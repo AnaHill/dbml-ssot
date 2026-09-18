@@ -232,8 +232,14 @@ def render_mermaid(lin: Lineage, interactive: bool = False) -> str:
     for tid in lin.ungrouped_ids:
         lines.append(f'  {tid}["{lin.table_labels[tid]}"]')
 
-    for a, b in lin.lineage_edges:
-        lines.append(f"  {a} --> {b}")
+    for idx, (a, b) in enumerate(lin.lineage_edges):
+        # Interactive output only: an edge id (`e0@-->`) so the edge can be
+        # animated below. The .md output stays on the plain `-->` form,
+        # because GitHub's and Obsidian's bundled Mermaid may predate the
+        # edge-id syntax (Mermaid 11.5+) and would render the diagram as an
+        # error instead of a flowchart.
+        arrow = f"e{idx}@-->" if interactive else "-->"
+        lines.append(f"  {a} {arrow} {b}")
 
     for src_id, nb_id, tid in lin.todo_edges:
         lines.append(
@@ -246,6 +252,12 @@ def render_mermaid(lin: Lineage, interactive: bool = False) -> str:
     lines.append("  classDef todo fill:#fff3cd,stroke:#e0a800,color:#7a5b00")
 
     if interactive:
+        # Animate the direction of data movement (Mermaid 11.5+). Only
+        # lineage edges get this — an FK edge is a structural relation, not
+        # a flow, and a TODO edge is a warning about missing information.
+        for idx in range(len(lin.lineage_edges)):
+            lines.append(f"  e{idx}@{{ animate: true }}")
+
         # Mark every node with its own class name (= the node's own id),
         # known to us. This way the JS doesn't need to guess Mermaid's
         # internal, undocumented SVG id format to identify nodes — it's
@@ -318,6 +330,14 @@ HTML_TEMPLATE = """<!doctype html>
   .diagram-zoom {{ display: inline-block; transform-origin: 0 0; padding: 1rem; }}
   .node.dimmed {{ opacity: 0.12; }}
   .edge-dimmed {{ opacity: 0.08; }}
+  /* Mermaid animates an edge by putting its own edge-animation-* class on
+     the path. Switching the animation off is done by overriding that here
+     rather than by removing the class, so nothing depends on Mermaid's
+     internal class names surviving a version bump — if they change, the
+     animation simply stays on and the checkbox stops biting. */
+  .diagram-zoom.animation-off path[class*="edge-animation"] {{
+    animation: none !important; stroke-dasharray: none !important;
+  }}
   .node.sel-1 rect, .node.sel-1 polygon {{ stroke: var(--sel-1) !important; stroke-width: 5px !important; filter: drop-shadow(0 0 3px var(--sel-1)); }}
   .node.sel-2 rect, .node.sel-2 polygon {{ stroke: var(--sel-2) !important; stroke-width: 5px !important; filter: drop-shadow(0 0 3px var(--sel-2)); }}
   .node.sel-3 rect, .node.sel-3 polygon {{ stroke: var(--sel-3) !important; stroke-width: 5px !important; filter: drop-shadow(0 0 3px var(--sel-3)); }}
@@ -351,6 +371,7 @@ HTML_TEMPLATE = """<!doctype html>
     <button id="zoom-in" type="button">+</button>
     <button id="zoom-reset" type="button">Reset</button>
   </div>
+  <label><input type="checkbox" id="animation-toggle" checked> Animate flow</label>
   <button id="clear-selection" type="button">Clear selection</button>
 </div>
 
@@ -593,6 +614,11 @@ HTML_TEMPLATE = """<!doctype html>
     zoomEl.style.transform = `scale(${{scale}})`;
     zoomLevelEl.textContent = Math.round(scale * 100) + "%";
   }}
+
+  const animationToggle = document.getElementById("animation-toggle");
+  animationToggle.addEventListener("change", () => {{
+    zoomEl.classList.toggle("animation-off", !animationToggle.checked);
+  }});
 
   document.getElementById("zoom-in").addEventListener("click", () => setScale(scale * 1.2));
   document.getElementById("zoom-out").addEventListener("click", () => setScale(scale / 1.2));

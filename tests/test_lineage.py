@@ -190,6 +190,49 @@ def test_render_mermaid_uses_distinct_classdef_per_mechanism():
     assert f"classDef mech_stored_procedure fill:{fill},stroke:{stroke}" in text
 
 
+ANIMATION_FIXTURE = """
+Table silver.dim_a {
+  id integer [pk]
+  Note: '''
+    source table: bronze.A
+    notebook: nb_a
+  '''
+}
+Table gold.dim_b {
+  id integer [pk, ref: > silver.dim_a.id]
+  Note: '''
+    source table: silver.dim_a
+    notebook: nb_b
+  '''
+}
+"""
+
+
+def test_render_mermaid_animates_lineage_edges_only_when_interactive():
+    lin = lineage.Lineage(PyDBML(ANIMATION_FIXTURE))
+    text = lineage.render_mermaid(lin, interactive=True)
+
+    # One id'd arrow and one animate statement per lineage edge, and nothing
+    # more: an FK edge is a structural relation, not a flow.
+    assert text.count("@-->") == len(lin.lineage_edges)
+    assert text.count("@{ animate: true }") == len(lin.lineage_edges)
+    assert "e0@-->" in text
+    assert "e0@{ animate: true }" in text
+    assert "-.->|FK|" in text
+
+
+def test_render_mermaid_keeps_plain_arrows_for_markdown_output():
+    """The .md output must stay on the plain `-->` form: GitHub's and
+    Obsidian's bundled Mermaid may predate the edge-id syntax (11.5+) and
+    would render an error instead of the diagram."""
+    lin = lineage.Lineage(PyDBML(ANIMATION_FIXTURE))
+    text = lineage.render_mermaid(lin)
+
+    assert "@-->" not in text
+    assert "animate" not in text
+    assert " --> " in text
+
+
 def test_render_mermaid_produces_flowchart_header():
     src = """
     Table silver.dim_a {
