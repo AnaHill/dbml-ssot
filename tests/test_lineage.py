@@ -1,8 +1,15 @@
 """Unit tests for lineage.py's graph computation. Includes regression tests
 for bugs found during this project's development."""
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 from pydbml import PyDBML
 
 import lineage
+
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "lineage.py"
 
 
 def test_mermaid_id_sanitizes_special_chars():
@@ -231,6 +238,43 @@ def test_render_mermaid_keeps_plain_arrows_for_markdown_output():
     assert "@-->" not in text
     assert "animate" not in text
     assert " --> " in text
+
+
+def test_layer_list_includes_source_and_orchestration_layers():
+    lin = lineage.Lineage(PyDBML(ANIMATION_FIXTURE))
+    ids = [layer["id"] for layer in lineage.layer_list(lin)]
+
+    # The pseudo-layers come first, in diagram order, so their checkboxes
+    # can be hidden/shown like any TableGroup.
+    assert ids[:2] == ["sources", "orchestration"]
+    for group in lin.groups:
+        assert group["id"] in ids
+
+
+def test_layer_list_and_graph_json_agree():
+    """The checkboxes and the page's JSON are built from the same list —
+    a layer with no checkbox could never be hidden, and a checkbox for a
+    layer no node belongs to would do nothing."""
+    lin = lineage.Lineage(PyDBML(ANIMATION_FIXTURE))
+    from_json = [layer["id"] for layer in json.loads(lineage.graph_json(lin))["layers"]]
+
+    assert from_json == [layer["id"] for layer in lineage.layer_list(lin)]
+
+
+def test_html_output_has_layer_toggles_and_export_controls(tmp_path, fixtures_dir):
+    out = tmp_path / "lineage.html"
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(fixtures_dir / "valid.dbml"), "-o", str(out)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    html = out.read_text(encoding="utf-8")
+    assert 'data-layer-toggle="sources"' in html
+    assert 'data-layer-toggle="orchestration"' in html
+    assert 'id="export-download"' in html
+    assert 'id="export-copy"' in html
 
 
 def test_render_mermaid_produces_flowchart_header():

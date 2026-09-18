@@ -31,7 +31,9 @@ another source of truth. Re-run whenever the DBML source changes.
                 path highlighted — each selected table gets its own color
                 in selection order, and shared path segments are colored
                 by the first-selected table. Click again to deselect a
-                table, show/hide layers with the checkboxes.
+                table, show/hide layers (including the sources and
+                orchestration nodes) with the checkboxes, and export what
+                you see as a PNG — to a file or straight to the clipboard.
 """
 import argparse
 import json
@@ -268,6 +270,23 @@ def render_mermaid(lin: Lineage, interactive: bool = False) -> str:
     return "\n".join(lines)
 
 
+def layer_list(lin: Lineage) -> list[dict[str, str]]:
+    """Every layer that can be shown/hidden, in diagram order: the sources
+    and orchestration pseudo-layers first (only when the model actually has
+    such nodes), then the TableGroups.
+
+    One list feeds both the toolbar checkboxes and the JSON handed to the
+    page, so the two can't drift apart.
+    """
+    layers: list[dict[str, str]] = []
+    if lin.source_nodes or lin.todo_edges:
+        layers.append({"id": "sources", "name": "Sources"})
+    if lin.orch_nodes or lin.todo_edges:
+        layers.append({"id": "orchestration", "name": "Orchestration"})
+    layers += [{"id": g["id"], "name": g["name"]} for g in lin.groups]
+    return layers
+
+
 def graph_json(lin: Lineage) -> str:
     nodes = {}
     for tid, label in lin.table_labels.items():
@@ -286,10 +305,9 @@ def graph_json(lin: Lineage) -> str:
         edges.append({"from": nb_id, "to": tid, "kind": "todo"})
     edges += [{"from": a, "to": b, "kind": "fk"} for a, b in lin.fk_edges]
 
-    layers = [{"id": "sources", "name": "Sources"}, {"id": "orchestration", "name": "Orchestration"}]
-    layers += [{"id": g["id"], "name": g["name"]} for g in lin.groups]
-
-    return json.dumps({"nodes": nodes, "edges": edges, "layers": layers}, ensure_ascii=False)
+    return json.dumps(
+        {"nodes": nodes, "edges": edges, "layers": layer_list(lin)}, ensure_ascii=False
+    )
 
 
 HTML_TEMPLATE = """<!doctype html>
@@ -322,6 +340,7 @@ HTML_TEMPLATE = """<!doctype html>
   }}
   .zoom-controls {{ display: flex; align-items: center; gap: 0.4rem; }}
   #zoom-level {{ min-width: 3.5em; text-align: center; color: #666; }}
+  #export-status {{ color: #666; font-size: 0.85rem; }}
   .diagram-scroll {{
     border: 1px solid #ddd; border-radius: 8px;
     height: 75vh; min-height: 420px; overflow: auto; background: #fff;
@@ -373,6 +392,11 @@ HTML_TEMPLATE = """<!doctype html>
   </div>
   <label><input type="checkbox" id="animation-toggle" checked> Animate flow</label>
   <button id="clear-selection" type="button">Clear selection</button>
+  <div class="zoom-controls">
+    <button id="export-download" type="button">Download PNG</button>
+    <button id="export-copy" type="button">Copy PNG</button>
+    <span id="export-status"></span>
+  </div>
 </div>
 
 <div class="diagram-scroll">
@@ -615,6 +639,96 @@ HTML_TEMPLATE = """<!doctype html>
     zoomLevelEl.textContent = Math.round(scale * 100) + "%";
   }}
 
+  // PNG export. Two things make this less trivial than serializing the SVG:
+  // the highlight/dim colors live in the page stylesheet rather than on the
+  // SVG elements (a bare serialization comes out unhighlighted), and an
+  // animated edge is mid-dash at any given moment. Both are handled by
+  // injecting the page's CSS plus an animation override into the clone.
+  // Hidden layers need no handling at all: they carry inline display:none,
+  // so whatever you filtered away on screen is absent from the image too.
+  const EXPORT_SCALE = 2;
+  const exportStatusEl = document.getElementById("export-status");
+  let statusTimer = 0;
+
+  function setExportStatus(text) {{
+    exportStatusEl.textContent = text;
+    clearTimeout(statusTimer);
+    if (text) statusTimer = setTimeout(() => {{ exportStatusEl.textContent = ""; }}, 4000);
+  }}
+
+  function svgToPngBlob() {{
+    const clone = svg.cloneNode(true);
+    const viewBox = svg.viewBox.baseVal;
+    const width = Math.ceil(viewBox && viewBox.width ? viewBox.width : svg.getBoundingClientRect().width);
+    const height = Math.ceil(viewBox && viewBox.height ? viewBox.height : svg.getBoundingClientRect().height);
+
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("width", width);
+    clone.setAttribute("height", height);
+
+    const pageCss = Array.from(document.querySelectorAll("style")).map((el) => el.textContent).join("\\n");
+    const styleEl = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    styleEl.textContent =
+      pageCss +
+      '\\npath[class*="edge-animation"] {{ animation: none !important; stroke-dasharray: none !important; }}';
+    clone.insertBefore(styleEl, clone.firstChild);
+
+    const svgUrl =
+      "data:image/svg+xml;charset=utf-8," +
+      encodeURIComponent(new XMLSerializer().serializeToString(clone));
+
+    return new Promise((resolve, reject) => {{
+      const img = new Image();
+      img.onload = () => {{
+        const canvas = document.createElement("canvas");
+        canvas.width = width * EXPORT_SCALE;
+        canvas.height = height * EXPORT_SCALE;
+        const ctx = canvas.getContext("2d");
+        // Without this the PNG is transparent, which reads badly against a
+        // dark README background even though the diagram's text is dark.
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.scale(EXPORT_SCALE, EXPORT_SCALE);
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error("canvas.toBlob() returned null"))),
+          "image/png"
+        );
+      }};
+      img.onerror = () => reject(new Error("the serialized SVG could not be loaded as an image"));
+      img.src = svgUrl;
+    }});
+  }}
+
+  async function exportPng(toClipboard) {{
+    setExportStatus("Rendering...");
+    try {{
+      const blob = await svgToPngBlob();
+      if (toClipboard) {{
+        await navigator.clipboard.write([new ClipboardItem({{ "image/png": blob }})]);
+        setExportStatus("Copied to clipboard.");
+      }} else {{
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "lineage.png";
+        link.click();
+        URL.revokeObjectURL(url);
+        setExportStatus("Saved as lineage.png.");
+      }}
+    }} catch (err) {{
+      console.error("lineage: PNG export failed", err);
+      setExportStatus(
+        toClipboard
+          ? "Copy failed (the browser may block clipboard images here) - use Download PNG."
+          : "Export failed - see the browser console."
+      );
+    }}
+  }}
+
+  document.getElementById("export-download").addEventListener("click", () => exportPng(false));
+  document.getElementById("export-copy").addEventListener("click", () => exportPng(true));
+
   const animationToggle = document.getElementById("animation-toggle");
   animationToggle.addEventListener("change", () => {{
     zoomEl.classList.toggle("animation-off", !animationToggle.checked);
@@ -722,8 +836,8 @@ def main() -> int:
 
     if is_html:
         layer_checkboxes = "\n    ".join(
-            f'<label><input type="checkbox" data-layer-toggle="{g["id"]}" checked> {g["name"]}</label>'
-            for g in lin.groups
+            f'<label><input type="checkbox" data-layer-toggle="{layer["id"]}" checked> {layer["name"]}</label>'
+            for layer in layer_list(lin)
         )
         output = HTML_TEMPLATE.format(
             source_file=source_desc,
