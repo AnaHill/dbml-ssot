@@ -1,0 +1,4 @@
+Table b {
+  id integer [pk]
+  a_id integer [ref: > a.id]
+}

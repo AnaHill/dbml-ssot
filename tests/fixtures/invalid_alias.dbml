@@ -1,0 +1,3 @@
+Table foo AS f {
+  id integer [pk]
+}

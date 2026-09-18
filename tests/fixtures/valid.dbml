@@ -1,0 +1,29 @@
+Project test_project {
+  database_type: 'Test'
+}
+
+TableGroup silver_layer [color: #C6E2FF] {
+  silver.dim_widget
+  silver.fact_widget_event
+}
+
+Table silver.dim_widget {
+  widget_id    integer   [pk, increment]
+  widget_name  varchar
+
+  Note: '''
+    source table: bronze.Widget
+    notebook: orchestration_notebooks/nb_dim_widget
+  '''
+}
+
+Table silver.fact_widget_event {
+  event_id    integer   [pk, increment]
+  widget_id   integer   [ref: > silver.dim_widget.widget_id]
+  event_date  date
+
+  Note: '''
+    source table: bronze.WidgetEvent
+    notebook: orchestration_notebooks/nb_fact_widget_event
+  '''
+}

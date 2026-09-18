@@ -1,0 +1,55 @@
+Project generic_rdbms_example {
+  database_type: 'Generic relational database (e.g. SQL Server / PostgreSQL)'
+  Note: '''
+    Example model, not part of the dbml/ folder's source of truth. Shows that
+    the same Note convention (source table + notebook) and the same scripts
+    (with no code changes) also work without a Lakehouse/Databricks/Fabric —
+    the "notebook" field here is a stored procedure or an ingestion script,
+    not a notebook.
+  '''
+}
+
+TableGroup raw_schema  {
+  raw.customers
+  raw.orders
+}
+
+TableGroup reporting_schema  {
+  reporting.customer_order_summary
+}
+
+Table raw.customers {
+  customer_id    integer   [pk, increment]
+  customer_name  varchar
+  country_code   varchar
+
+  Note: '''
+    source table: erp.Customers
+    notebook: ingestion_jobs/load_customers.ps1
+  '''
+}
+
+Table raw.orders {
+  order_id     integer   [pk, increment]
+  customer_id  integer   [ref: > raw.customers.customer_id]
+  order_date   date
+  amount       decimal
+
+  Note: '''
+    source table: erp.Orders
+    notebook: ingestion_jobs/load_orders.ps1
+  '''
+}
+
+Table reporting.customer_order_summary {
+  customer_id    integer   [pk, ref: > raw.customers.customer_id]
+  customer_name  varchar
+  order_count    integer
+  total_amount   decimal
+
+  Note: '''
+    source table: raw.customers + raw.orders (join)
+    notebook: dbo.usp_BuildCustomerOrderSummary
+    remark: SQL Server stored procedure, not a notebook — shows the Note convention isn't tied to Databricks/Fabric notebooks
+  '''
+}

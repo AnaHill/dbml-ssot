@@ -1,0 +1,280 @@
+Project medallion_architecture {
+  database_type: 'Fabric / Databricks (Lakehouse)'
+  Note: 'Lightweight documentation model'
+}
+
+TableGroup bronze_layer [color: #D9D9D9] {
+  bronze.Area
+  bronze.Location
+  bronze.Product
+  bronze.Machine
+  bronze.ProductionEvents
+  bronze.DowntimeEvents
+}
+
+TableGroup silver_layer [color: #C6E2FF] {
+  silver.area
+  silver.location
+  silver.product
+  silver.machine
+  silver.location_enriched
+  silver.production_events
+}
+
+TableGroup gold_layer [color: #FFD966] {
+  gold.dim_area
+  gold.dim_location
+  gold.dim_product
+  gold.dim_machine
+  gold.dim_location_enriched
+  gold.fact_production_view
+  gold.fact_production_monthly
+  gold.fact_downtime_by_location
+}
+
+Table bronze.Area {
+  area_id      integer   [pk]
+  area_name    varchar
+  region_code  varchar
+
+  Note: '''
+    source table: source_system.bronze_area
+    notebook: orchestration_notebooks/nb_ingest_area
+  '''
+}
+
+Table bronze.Location {
+  location_id    integer   [pk]
+  area_id        integer
+  location_name  varchar
+
+  Note: '''
+    source table: source_system.loc
+    notebook: adf_pipelines/pl_copy_bronze_location
+    mechanism: pipeline
+  '''
+}
+
+Table bronze.Product {
+  product_id    integer   [pk]
+  product_code  varchar
+  product_name  varchar
+
+  Note: '''
+    source table: source_system.product
+    notebook: fabric_pipelines/pl_copy_bronze_product
+    mechanism: pipeline
+  '''
+}
+
+Table bronze.Machine {
+  machine_id    integer   [pk]
+  area_id       integer
+  machine_code  varchar
+  machine_name  varchar
+
+  Note: '''
+    source table: source_system.machine
+    notebook: orchestration_notebooks/nb_ingest_machine
+  '''
+}
+
+Table bronze.ProductionEvents {
+  production_id    integer   [pk]
+  area_id          integer
+  location_id      integer
+  product_id       integer
+  production_date  date
+  quantity         decimal
+
+  Note: '''
+    source table: source_system.production_events
+    notebook: orchestration_notebooks/nb_ingest_production_events
+  '''
+}
+
+Table bronze.DowntimeEvents {
+  downtime_id       integer    [pk]
+  location_id       integer
+  downtime_start    timestamp
+  downtime_end      timestamp
+  duration_minutes  integer
+
+  Note: '''
+    source table: source_system.bronze_downtime_events
+    notebook: orchestration_notebooks/nb_ingest_downtime_events
+  '''
+}
+
+Table silver.area {
+  area_id      integer   [pk, increment]
+  area_name    varchar
+  region_code  varchar
+
+  Note: '''
+    source table: bronze.Area
+    notebook: orchestration_notebooks/nb_dim_area
+  '''
+}
+
+Table silver.location {
+  location_id    integer   [pk, increment]
+  area_id        integer   [ref: > silver.area.area_id]
+  location_name  varchar
+
+  Note: '''
+    source table: bronze.Location
+    notebook: orchestration_notebooks/nb_dim_location
+  '''
+}
+
+Table silver.product {
+  product_id    integer   [pk, increment]
+  product_code  varchar
+  product_name  varchar
+
+  Note: '''
+    source table: bronze.Product
+    notebook: orchestration_notebooks/nb_dim_product
+  '''
+}
+
+Table silver.machine {
+  machine_id    integer   [pk, increment]
+  area_id       integer   [ref: > silver.area.area_id]
+  machine_code  varchar
+  machine_name  varchar
+
+  Note: '''
+    source table: bronze.Machine
+    notebook: orchestration_notebooks/nb_dim_machine
+  '''
+}
+
+Table silver.location_enriched {
+  location_id    integer   [pk, increment]
+  location_name  varchar
+  area_id        integer
+  area_name      varchar
+  region_code    varchar
+
+  Note: '''
+    source table: silver.location + silver.area (join)
+    notebook: orchestration_notebooks/nb_dim_location_enriched
+  '''
+}
+
+Table silver.production_events {
+  production_id    integer   [pk, increment]
+  area_id          integer   [ref: > silver.area.area_id]
+  location_id      integer   [ref: > silver.location.location_id]
+  product_id       integer   [ref: > silver.product.product_id]
+  production_date  date
+  quantity         decimal
+
+  Note: '''
+    source table: bronze.ProductionEvents
+    notebook: orchestration_notebooks/nb_fact_production
+  '''
+}
+
+Table gold.dim_area {
+  area_id      integer   [pk, increment]
+  area_name    varchar
+  region_code  varchar
+
+  Note: '''
+    source table: silver.area
+    notebook: stored_procedures/usp_load_gold_dim_area
+    mechanism: stored_procedure
+  '''
+}
+
+Table gold.dim_location {
+  location_id    integer   [pk, increment]
+  area_id        integer   [ref: > gold.dim_area.area_id]
+  location_name  varchar
+
+  Note: '''
+    source table: silver.location
+    notebook: orchestration_notebooks/nb_gold_dim_location
+  '''
+}
+
+Table gold.dim_product {
+  product_id    integer   [pk, increment]
+  product_code  varchar
+  product_name  varchar
+
+  Note: '''
+    source table: silver.product
+    notebook: orchestration_notebooks/nb_gold_dim_product
+  '''
+}
+
+Table gold.dim_machine {
+  machine_id    integer   [pk, increment]
+  area_id       integer   [ref: > gold.dim_area.area_id]
+  machine_code  varchar
+  machine_name  varchar
+
+  Note: '''
+    source table: silver.machine
+    notebook: orchestration_notebooks/nb_gold_dim_machine
+  '''
+}
+
+Table gold.dim_location_enriched {
+  location_id    integer   [pk, increment]
+  location_name  varchar
+  area_id        integer
+  area_name      varchar
+  region_code    varchar
+
+  Note: '''
+    source table: silver.location_enriched
+    notebook: orchestration_notebooks/nb_gold_dim_location_enriched
+  '''
+}
+
+Table gold.fact_production_view {
+  production_id    integer   [pk]
+  area_id          integer   [ref: > gold.dim_area.area_id]
+  location_id      integer   [ref: > gold.dim_location.location_id]
+  product_id       integer   [ref: > gold.dim_product.product_id]
+  production_date  date
+  quantity         decimal
+
+  Note: '''
+    source table: silver.production_events
+    notebook: orchestration_notebooks/nb_fact_production_view
+    remark: SQL view, not a physical table — joins the silver fact to the gold dimensions
+  '''
+}
+
+Table gold.fact_production_monthly {
+  production_month  date      [pk]
+  area_id           integer   [pk, ref: > gold.dim_area.area_id]
+  product_id        integer   [pk, ref: > gold.dim_product.product_id]
+  location_id       integer   [ref: > gold.dim_location.location_id]
+  total_quantity    decimal
+
+  Note: '''
+    source table: silver.production_events + silver.product + silver.location (inner join product, left join location, group by month/area/product)
+    notebook: orchestration_notebooks/nb_fact_production_monthly
+    remark: monthly aggregate, not event-level data
+  '''
+}
+
+Table gold.fact_downtime_by_location {
+  downtime_month          date      [pk]
+  area_id                 integer   [pk, ref: > gold.dim_area.area_id]
+  location_id             integer   [pk, ref: > gold.dim_location.location_id]
+  downtime_event_count    integer
+  total_downtime_minutes  decimal
+
+  Note: '''
+    source table: bronze.DowntimeEvents + silver.location + silver.area (inner join location, inner join area, group by month/area/location)
+    notebook: orchestration_notebooks/nb_fact_downtime_by_location
+  '''
+}

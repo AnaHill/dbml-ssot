@@ -1,0 +1,39 @@
+# Machine-local Claude Code permissions (contains local paths, not shared; .claude/settings.json is the shared one)
+.claude/settings.local.json
+
+# Shortcuts
+*.lnk
+
+# Canvas files
+*.canvas
+
+# Python environment/cache
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editor/tooling folders
+.vscode/
+.idea/
+
+# Generated views (derived, not a source of truth) — keep the folder, ignore its contents
+generated/*
+!generated/.gitkeep
+
+# Secrets
+.env
+.env.local
+
+# Logs
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Temporary files and notes not meant for version control
+temp*.md
+temp*.sql
+testi*.sql
+

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source .venv/Scripts/activate*)",
+      "Bash(python scripts/validate_dbml.py*)",
+      "Bash(python scripts/export_sql.py*)",
+      "Bash(python scripts/copy_dbml.py*)",
+      "Bash(python scripts/preview_md.py*)",
+      "Bash(python scripts/lineage.py*)",
+      "Bash(python scripts/new_table.py*)",
+      "Bash(python scripts/sql_to_dbml.py*)"
+    ]
+  }
+}

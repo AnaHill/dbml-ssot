@@ -1,0 +1,2 @@
+pydbml>=1.2.1
+sqlglot>=25.0
