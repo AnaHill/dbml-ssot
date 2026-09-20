@@ -220,8 +220,9 @@ def test_render_mermaid_animates_lineage_edges_only_when_interactive():
     text = lineage.render_mermaid(lin, interactive=True)
 
     # One id'd arrow and one animate statement per lineage edge, and nothing
-    # more: an FK edge is a structural relation, not a flow.
-    assert text.count("@-->") == len(lin.lineage_edges)
+    # more: an FK edge is a structural relation, not a flow. Both arrow
+    # forms count — thin into a process node, thick out of it.
+    assert text.count("@-->") + text.count("@==>") == len(lin.lineage_edges)
     assert text.count("@{ animate: true }") == len(lin.lineage_edges)
     assert "e0@-->" in text
     assert "e0@{ animate: true }" in text
@@ -238,6 +239,53 @@ def test_render_mermaid_keeps_plain_arrows_for_markdown_output():
     assert "@-->" not in text
     assert "animate" not in text
     assert " --> " in text
+
+
+def test_render_mermaid_uses_thick_arrow_only_for_the_populating_hop():
+    """A process reads the table on its input hop and populates the table on
+    its output hop — the thick arrow marks the second. Both keep their
+    arrowhead: in Mermaid's layout an edge often passes under an unrelated
+    node, and the arrowhead is what separates "ends here" from "passes by"."""
+    lin = lineage.Lineage(PyDBML(ANIMATION_FIXTURE))
+    text = lineage.render_mermaid(lin)
+
+    for a, b in lin.lineage_edges:
+        if a in lin.orch_nodes:
+            assert f"  {a} ==> {b}" in text
+        else:
+            assert f"  {a} --> {b}" in text
+
+
+def test_render_mermaid_keeps_edge_ids_on_thick_arrows_when_interactive():
+    lin = lineage.Lineage(PyDBML(ANIMATION_FIXTURE))
+    text = lineage.render_mermaid(lin, interactive=True)
+
+    assert "@==>" in text
+    assert "@-->" in text
+    assert text.count("@{ animate: true }") == len(lin.lineage_edges)
+
+
+def test_legend_lists_only_what_the_diagram_shows():
+    lin = lineage.Lineage(PyDBML(ANIMATION_FIXTURE))
+    html = lineage.legend_html(lin)
+
+    assert "reads" in html and "writes" in html
+    assert "notebook" in html
+    # No stored procedure or pipeline is used by this model, and nothing is
+    # missing, so neither may appear in the legend.
+    assert "stored procedure" not in html
+    assert "TODO" not in html
+
+
+def test_legend_shows_todo_entry_when_lineage_is_missing():
+    src = """
+    Table silver.dim_no_note {
+      id integer [pk]
+    }
+    """
+    html = lineage.legend_html(lineage.Lineage(PyDBML(src)))
+
+    assert "TODO" in html
 
 
 def test_layer_list_includes_source_and_orchestration_layers():

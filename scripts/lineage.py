@@ -99,6 +99,7 @@ MECHANISM_STYLES: dict[str, tuple[str, str]] = {
     "stored_procedure": ("#F5B971", "#B96A1E"),  # orange
 }
 DEFAULT_MECHANISM_STYLE = ("#B0B0B0", "#6b6b6b")  # unrecognized mechanism value (gray)
+TODO_STYLE = ("#fff3cd", "#e0a800", "#7a5b00")  # fill, stroke, text: missing/TODO lineage
 
 
 class Lineage:
@@ -235,12 +236,20 @@ def render_mermaid(lin: Lineage, interactive: bool = False) -> str:
         lines.append(f'  {tid}["{lin.table_labels[tid]}"]')
 
     for idx, (a, b) in enumerate(lin.lineage_edges):
+        # A thin arrow INTO a process node (it reads that table) and a thick
+        # one OUT of it (it populates that table). The arrowhead stays on
+        # both: in Mermaid's layout an edge often passes under an unrelated
+        # node, and the arrowhead at the target is the only thing separating
+        # "this edge ends here" from "this edge just passes by" — dropping
+        # it would make the diagram harder to follow, not easier.
+        arrow = "==>" if a in lin.orch_nodes else "-->"
         # Interactive output only: an edge id (`e0@-->`) so the edge can be
-        # animated below. The .md output stays on the plain `-->` form,
+        # animated below. The .md output stays on the plain arrow forms,
         # because GitHub's and Obsidian's bundled Mermaid may predate the
         # edge-id syntax (Mermaid 11.5+) and would render the diagram as an
         # error instead of a flowchart.
-        arrow = f"e{idx}@-->" if interactive else "-->"
+        if interactive:
+            arrow = f"e{idx}@{arrow}"
         lines.append(f"  {a} {arrow} {b}")
 
     for src_id, nb_id, tid in lin.todo_edges:
@@ -251,7 +260,8 @@ def render_mermaid(lin: Lineage, interactive: bool = False) -> str:
     for a, b in lin.fk_edges:
         lines.append(f"  {a} -.->|FK| {b}")
 
-    lines.append("  classDef todo fill:#fff3cd,stroke:#e0a800,color:#7a5b00")
+    todo_fill, todo_stroke, todo_text = TODO_STYLE
+    lines.append(f"  classDef todo fill:{todo_fill},stroke:{todo_stroke},color:{todo_text}")
 
     if interactive:
         # Animate the direction of data movement (Mermaid 11.5+). Only
@@ -268,6 +278,65 @@ def render_mermaid(lin: Lineage, interactive: bool = False) -> str:
             lines.append(f"  class {node_id} {node_id}")
 
     return "\n".join(lines)
+
+
+def legend_html(lin: Lineage) -> str:
+    """The interactive page's legend, built from the same constants and the
+    same model as the diagram itself — a hand-written legend would be the
+    one thing in this repo that silently goes out of date.
+
+    Only what the diagram actually shows is listed: a mechanism appears
+    once some table uses it, and the TODO entry only when something is
+    genuinely missing.
+    """
+    items: list[str] = []
+
+    if lin.source_nodes:
+        items.append(
+            f'<span class="legend-item"><span class="legend-box" '
+            f'style="background:{SOURCES_COLOR}33;border-color:#8a6a3d"></span>'
+            f"upstream source</span>"
+        )
+
+    items.append(
+        '<span class="legend-item"><span class="legend-box"></span>table</span>'
+    )
+
+    used_mechanisms = sorted(
+        {lin.orch_mechanism.get(nid, "notebook") for nid in lin.orch_nodes}
+    )
+    for mechanism in used_mechanisms:
+        fill, stroke = MECHANISM_STYLES.get(mechanism, DEFAULT_MECHANISM_STYLE)
+        items.append(
+            f'<span class="legend-item"><span class="legend-hex" '
+            f'style="background:{fill};border-color:{stroke}"></span>'
+            f"{mechanism.replace('_', ' ')}</span>"
+        )
+
+    items.append(
+        '<span class="legend-item"><span class="legend-line legend-thin"></span>'
+        "reads: the process reads this table</span>"
+    )
+    items.append(
+        '<span class="legend-item"><span class="legend-line legend-thick"></span>'
+        "writes: the process populates this table</span>"
+    )
+
+    if lin.fk_edges:
+        items.append(
+            '<span class="legend-item"><span class="legend-line legend-dashed"></span>'
+            "foreign key</span>"
+        )
+
+    if lin.todo_edges:
+        todo_fill, todo_stroke, _ = TODO_STYLE
+        items.append(
+            f'<span class="legend-item"><span class="legend-box" '
+            f'style="background:{todo_fill};border-color:{todo_stroke}"></span>'
+            f"lineage missing (TODO)</span>"
+        )
+
+    return "\n  ".join(items)
 
 
 def layer_list(lin: Lineage) -> list[dict[str, str]]:
@@ -341,6 +410,23 @@ HTML_TEMPLATE = """<!doctype html>
   .zoom-controls {{ display: flex; align-items: center; gap: 0.4rem; }}
   #zoom-level {{ min-width: 3.5em; text-align: center; color: #666; }}
   #export-status {{ color: #666; font-size: 0.85rem; }}
+  .legend {{
+    display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; align-items: center;
+    margin: 0 0 1rem; font-size: 0.82rem; color: #444;
+  }}
+  .legend-item {{ display: flex; align-items: center; gap: 0.4rem; }}
+  .legend-box {{
+    display: inline-block; width: 18px; height: 12px; border-radius: 2px;
+    background: #ececff; border: 1px solid #9370db;
+  }}
+  .legend-hex {{
+    display: inline-block; width: 18px; height: 12px; border: 1px solid #6b5b95;
+    clip-path: polygon(18% 0, 82% 0, 100% 50%, 82% 100%, 18% 100%, 0 50%);
+  }}
+  .legend-line {{ display: inline-block; width: 26px; border-top-color: #333; }}
+  .legend-thin {{ border-top-style: solid; border-top-width: 1.5px; }}
+  .legend-thick {{ border-top-style: solid; border-top-width: 4px; }}
+  .legend-dashed {{ border-top-style: dashed; border-top-width: 1.5px; }}
   .diagram-scroll {{
     border: 1px solid #ddd; border-radius: 8px;
     height: 75vh; min-height: 420px; overflow: auto; background: #fff;
@@ -365,14 +451,19 @@ HTML_TEMPLATE = """<!doctype html>
   .node.sel-6 rect, .node.sel-6 polygon {{ stroke: var(--sel-6) !important; stroke-width: 5px !important; filter: drop-shadow(0 0 3px var(--sel-6)); }}
   .node.sel-7 rect, .node.sel-7 polygon {{ stroke: var(--sel-7) !important; stroke-width: 5px !important; filter: drop-shadow(0 0 3px var(--sel-7)); }}
   .node.sel-8 rect, .node.sel-8 polygon {{ stroke: var(--sel-8) !important; stroke-width: 5px !important; filter: drop-shadow(0 0 3px var(--sel-8)); }}
-  path.edge-sel-1 {{ stroke: var(--sel-1) !important; stroke-width: 3px !important; }}
-  path.edge-sel-2 {{ stroke: var(--sel-2) !important; stroke-width: 3px !important; }}
-  path.edge-sel-3 {{ stroke: var(--sel-3) !important; stroke-width: 3px !important; }}
-  path.edge-sel-4 {{ stroke: var(--sel-4) !important; stroke-width: 3px !important; }}
-  path.edge-sel-5 {{ stroke: var(--sel-5) !important; stroke-width: 3px !important; }}
-  path.edge-sel-6 {{ stroke: var(--sel-6) !important; stroke-width: 3px !important; }}
-  path.edge-sel-7 {{ stroke: var(--sel-7) !important; stroke-width: 3px !important; }}
-  path.edge-sel-8 {{ stroke: var(--sel-8) !important; stroke-width: 3px !important; }}
+  /* A highlighted edge gets its color and a glow, but deliberately NOT a
+     fixed stroke-width: forcing one would flatten the thin/thick (read/
+     write) distinction and the dashed FK edges into one uniform line,
+     exactly when a path is being inspected most closely. The dimming of
+     everything else already makes the selection stand out. */
+  path.edge-sel-1 {{ stroke: var(--sel-1) !important; filter: drop-shadow(0 0 2px var(--sel-1)); }}
+  path.edge-sel-2 {{ stroke: var(--sel-2) !important; filter: drop-shadow(0 0 2px var(--sel-2)); }}
+  path.edge-sel-3 {{ stroke: var(--sel-3) !important; filter: drop-shadow(0 0 2px var(--sel-3)); }}
+  path.edge-sel-4 {{ stroke: var(--sel-4) !important; filter: drop-shadow(0 0 2px var(--sel-4)); }}
+  path.edge-sel-5 {{ stroke: var(--sel-5) !important; filter: drop-shadow(0 0 2px var(--sel-5)); }}
+  path.edge-sel-6 {{ stroke: var(--sel-6) !important; filter: drop-shadow(0 0 2px var(--sel-6)); }}
+  path.edge-sel-7 {{ stroke: var(--sel-7) !important; filter: drop-shadow(0 0 2px var(--sel-7)); }}
+  path.edge-sel-8 {{ stroke: var(--sel-8) !important; filter: drop-shadow(0 0 2px var(--sel-8)); }}
 </style>
 </head>
 <body>
@@ -397,6 +488,10 @@ HTML_TEMPLATE = """<!doctype html>
     <button id="export-copy" type="button">Copy PNG</button>
     <span id="export-status"></span>
   </div>
+</div>
+
+<div class="legend">
+  {legend}
 </div>
 
 <div class="diagram-scroll">
@@ -845,6 +940,7 @@ def main() -> int:
             mermaid=mermaid,
             graph_json=graph_json(lin),
             layer_checkboxes=layer_checkboxes,
+            legend=legend_html(lin),
         )
     else:
         output = (
