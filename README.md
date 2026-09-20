@@ -1,6 +1,10 @@
-# AI-assisted data architecture
+# AI-assisted data architecture and visualization
 
-Goal: model data as code that works well for an AI agent AND is human-friendly.
+A data architecture described as code in one place — readable by a human, safe for an AI agent to maintain.
+
+- **One source of truth: plain `.dbml` code.** Every diagram, SQL export and preview is generated from it, never kept in sync by hand.
+- **Human-friendly both ways.** Edit the text directly in your editor, or view it as an ERD or an interactive lineage diagram.
+- **Built for an agent to maintain.** DBML is compact text an LLM reads well, and [AGENTS.md](AGENTS.md) sets the guardrails it works under.
 
 ## Decision
 
@@ -10,6 +14,7 @@ The data model is described **in the `dbml/` folder**, as plain DBML code — no
 - **Local graphical preview** (optional, view-only — editing always happens directly in the `dbml/` files): primarily the VS Code extension [DBML ERD Visualizer](https://marketplace.visualstudio.com/items?itemName=bocovo.dbml-erd-visualizer) (reads the `.dbml` file directly in the editor, no script needed). Alternatives: [dbdiagram.io's official VS Code extension](https://docs.dbdiagram.io/vs-code-extension/) (basic use — syntax highlighting + ERD preview — is local), or Obsidian + the [DBML Visualizer](https://community.obsidian.md/plugins/dbml-visualizer) plugin. If a tool specifically needs a markdown-wrapped code block (like the Obsidian plugin), `python scripts/preview_md.py` generates one (`generated/preview.md`) — not versioned as a separate source of truth, just a generated view.
 - **SQL DDL** is generated only when needed (`scripts/export_sql.py`), not automatically. The goal right now isn't to run a live system from this model.
 - **Syntax validation**, a **data lineage diagram**, and a **new-table scaffold** are handled by Python scripts in `scripts/`, without needing an agent for every change.
+- **Agent guardrails** live in [AGENTS.md](AGENTS.md): never invent a source table or an orchestrating job — write the exact string `TODO`, which the lineage diagram then flags in its own warning style; propose rather than write straight into the model; and let validation and the test suite decide when a change is done.
 
 ## Tools
 
@@ -136,12 +141,12 @@ A second, orthogonal axis is **one-off vs. deterministic generation**. [Archify]
 - `docs/img/` — static images used by this README. Refreshed by hand, unlike `generated/`.
 - `tests/` — pytest tests for the scripts (see Testing below)
 - [requirements.txt](requirements.txt) — runtime dependencies (`pydbml`, `sqlglot`)
-- [requirements-dev.txt](requirements-dev.txt) — dev/test dependencies (`pytest`), kept separate from the above
-- [LICENSE](LICENSE) — MIT
+- [requirements-dev.txt](requirements-dev.txt): dev/test dependencies (`pytest`), kept separate from the above
+- [LICENSE](LICENSE): MIT
 
 ## Getting started
 
-Every line below is either a plain comment (a `#` line) or a directly runnable command as-is — never both on the same line. All seven scripts each have their own example.
+Each script below has its own runnable example to get you started.
 
 Bash
 ```bash
