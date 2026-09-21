@@ -40,12 +40,22 @@ Commands:
   1. `CREATE TABLE ... AS SELECT` / `CREATE [OR REPLACE] VIEW ... AS SELECT` (CTAS/CTAV) — column types are inferred from the source tables in the given DBML source.
   2. A plain `CREATE TABLE name (column type, ...)` (no `AS SELECT`) — columns and types are read straight from the DDL. Intended for raw/ingested tables (e.g. the bronze layer) that have no SQL source.
 
-  Any other SQL (a plain `SELECT`, `INSERT`, `MERGE`, `ALTER`, etc.) is rejected with an error and nothing is updated. Doesn't write directly to the `.dbml` file — prints the proposal for review, to be pasted in yourself to the right file and `TableGroup` block, the same way as `new_table.py`. An extra `--clipboard` flag also copies the printed proposals to the clipboard (Windows, PowerShell — same technique as `copy_dbml.py`) in addition to printing them, making it easier to paste into a `.dbml` file or elsewhere; it doesn't change the fact that the tool never writes directly to a file. **Known gaps** that can't be inferred from SQL: the `notebook` field is always `TODO` (orchestration info isn't in the SQL — fill it in yourself, don't invent a value); `source table` is inferred from the source tables for CTAS/CTAV statements, but is always `TODO` for a plain `CREATE TABLE` (no SQL source to infer it from); the type of computed/aggregated columns (`SUM`, `DATE_TRUNC`, etc.) in CTAS/CTAV statements is marked `varchar` + `[note: 'TODO: verify type']` if the source column isn't found in the given DBML source — plain `CREATE TABLE` columns don't have this gap, since the type always comes straight from the DDL. Check every `TODO` marker by hand regardless, before considering the table done.
-- **Data lineage diagram** (upstream source → notebook/pipeline/stored procedure → table, FK relations between tables, grouped by `TableGroup` — generic, doesn't depend on Lakehouse vocabulary, see Generality below): `python scripts/lineage.py -o generated/lineage.md` generates a Mermaid flowchart from the `Note` fields and `Ref` relations. Missing/`TODO` lineage is shown in the diagram in its own warning color. A thin arrow runs into an orchestration node (the process reads that table) and a thick one out of it (the process populates that table) — both keep their arrowhead, since in Mermaid's layout an edge often passes under an unrelated node and the arrowhead is what tells you where it actually ends. The interactive page explains this in a legend generated from the model itself, so it lists only the mechanisms that model really uses. If the `.md` preview doesn't render mermaid reliably: `python scripts/lineage.py -o generated/lineage.html` — a standalone, **interactive** HTML file (mermaid.js from a CDN). Click a table to see its whole upstream/downstream path highlighted — several tables can be selected at once, each getting its own color from a fixed palette. Lineage edges are animated in the direction the data moves (Mermaid 11.5+); the "Animate flow" checkbox turns that off. Layers can be shown/hidden with checkboxes — including the source and orchestration nodes, not just the `TableGroup`s — and the diagram zooms and pans. "Download PNG" and "Copy PNG" export exactly what's on screen at 2× resolution, with the current selection highlighted and hidden layers left out, which is how the image above was produced. The animation is deliberately left out of the `.md` output, since GitHub's and Obsidian's bundled Mermaid may be too old for the edge-id syntax it needs.
+  Any other SQL is rejected with an error and nothing is updated. The tool never writes into the `.dbml` file — it prints a proposal for you to review and paste in, and `--clipboard` also copies it. What SQL cannot tell it is marked `TODO` rather than guessed: always the `notebook` field, `source table` for a plain `CREATE TABLE`, and a computed column's type when the source column isn't in the model. Check every `TODO` by hand before considering the table done. Why the input is restricted to two shapes: [DECISIONS.md](DECISIONS.md).
+- **Data lineage diagram**: `python scripts/lineage.py -o generated/lineage.md` builds a Mermaid flowchart from the `Note` fields and `Ref` relations — upstream source → process → table, plus the foreign keys, grouped by `TableGroup`. Nothing in it assumes Lakehouse vocabulary (see Generality below). A thin arrow runs into a process node (it reads that table) and a thick one out of it (it populates that table); missing or `TODO` lineage shows up in its own warning color rather than disappearing.
+
+  `-o generated/lineage.html` instead produces a standalone **interactive** page (mermaid.js from a CDN) that opens with a double-click:
+
+  - Click a table to light up its whole upstream/downstream path. Several selections at once, each in its own color.
+  - Edges animate in the direction data moves; "Animate flow" turns that off.
+  - Show/hide any layer, including the source and process nodes.
+  - "Download PNG" / "Copy PNG" export exactly what's on screen at 2× — selection highlighted, hidden layers gone. That's how the image below was made.
+  - A legend generated from the model itself, listing only the mechanisms that model actually uses.
+
+  The animation is deliberately absent from the `.md` output: GitHub's and Obsidian's bundled Mermaid may predate the edge-id syntax it needs.
 
 ![A lineage diagram: source systems on the left, orchestration nodes between them, and the bronze, silver and gold layers as grouped blocks; two selected tables highlight their own upstream/downstream paths in different colors](docs/img/lineage-example.png)
 
-The image is a static snapshot of this repo's own `dbml/schema.dbml` in the interactive HTML view, with two tables selected. It is a documentation illustration that is refreshed by hand — regenerate the live, clickable version with `python scripts/lineage.py -o generated/lineage.html`.
+A static snapshot of this repo's own `dbml/schema.dbml` with two tables selected — the live, clickable version is one command away: `python scripts/lineage.py -o generated/lineage.html`.
 
 Everything in `generated/` is a **derived view, not a source of truth** — not versioned in git, never edited by hand, re-run whenever the DBML source changes.
 
@@ -62,66 +72,9 @@ python scripts/validate_dbml.py examples/generic_rdbms.dbml
 python scripts/lineage.py examples/generic_rdbms.dbml -o generated/lineage_example.md
 ```
 
-## Why we ended up here
+## Why it looks like this
 
-### Original idea
-The original idea was three parallel representations (SQL `schemat.md`, DBML `kuvaus.md`, an Obsidian visual) that an agent/script would keep in sync with each other. This was rejected: several parallel "truths" drift out of sync over time. One source is safer.
-
-### Alternatives considered
-Alternatives considered for DBML:
-
-- **Mermaid `erDiagram`** — renders natively in more places (GitHub, Obsidian's core, VS Code) without a third-party plugin, which would have reduced a dependency.
-  - Rejected as the main choice anyway, because it doesn't support per-table `Note` metadata as well as DBML — exactly the feature that lets every table document its bronze source and orchestrating notebook directly in the model.
-- **The Obsidian DBML Visualizer plugin as an interactive editor** — offers low-code editing (rename, changing cardinality by clicking) directly in Obsidian, but is a small, new project (v1.0.2, about 2 months old at the time) → abandonment risk. The same risk applies to comparable Mermaid editors (e.g. Mermaid NG for VS Code, still unpublished to the marketplace). None of these are as mature as **dbdiagram.io**, where exactly the same feature set has been in production for years.
-  - So dbdiagram.io is the primary editor, and the Obsidian plugin is just an optional extra.
-- **VS Code extensions for graphical ERD preview** — since editing is now always done directly on the `.dbml` files (not via dbdiagram.io, see above), the need is just for a local visual preview in the same editor where the model is edited. Three options checked: [`bocovo.dbml-erd-visualizer`](https://marketplace.visualstudio.com/items?itemName=bocovo.dbml-erd-visualizer) (open source, no login, preview opens in a side panel with a click — the marketplace listing doesn't separately confirm network traffic, but being open source makes it checkable if needed), [dbdiagram.io's official extension](https://docs.dbdiagram.io/vs-code-extension/) (documented: basic use is local, network only for paid sync/publish features), and Obsidian + the DBML Visualizer plugin (see above — needs a separate app and `preview_md.py`'s markdown wrapper).
-  - `bocovo.dbml-erd-visualizer` was chosen as the primary option because it works directly in the same editor where the model is edited, with no context switch or extra step.
-- **dbt (`sources.yml`/`schema.yml`)** — would make sense if a real pipeline were run from the model, but overkill when the goal is lightweight documentation with no live execution.
-
-### DBML in a markdown fence vs. its own .dbml file
-At first DBML was written inside `kuvaus.md` in a single ` ```dbml ` code block, and `kuvaus.md` also held the tool instructions. This was changed to a plain `.dbml` file, because:
-
-- Four scripts had to repeat the same "extract the dbml block from markdown" logic — this disappears entirely once the file is already plain DBML.
-- A separate `.dbml` file can get real DBML syntax highlighting in an editor; inside a markdown fence it can't.
-- `kuvaus.md` no longer had a reason to be separate from `readme.md` once it held no model — its content was merged into this file.
-
-If a markdown preview is ever needed (e.g. the Obsidian plugin), it isn't maintained by hand as a parallel copy — `scripts/preview_md.py` generates it from the DBML source when needed (see Tools).
-
-### schema.dbml at the repo root vs. in a dbml/ folder
-`schema.dbml` was moved from the repo root into its own `dbml/` folder right at the start (before anything was committed), for two reasons:
-
-- Keeps the repo root clean — the data model separate from documentation, scripts, and tests.
-- Allows growth in two directions later without a second disruptive move: either the model is split across several files per domain (`10_silver.dbml`, `20_gold.dbml`, ...) in the same folder, or — if genuinely needed — several independent projects could each live in their own subfolder (`dbml/<project>/`). The latter hasn't been implemented and there's no known need for it; the structure simply doesn't rule it out if that ever changes.
-
-The three-part input model the scripts support (no argument / a single file-or-folder / a list in the given order, see Tools) is already sufficient for both the per-domain split and the multi-project case — neither needed a separate "list of projects" mechanism or the like to be built. The one thing that would change with more projects: the default (`dbml/schema.dbml`) would stop being unambiguous, and a path would always have to be given explicitly.
-
-### SQL → DBML import: only CREATE TABLE/VIEW ... AS SELECT or a plain CREATE TABLE
-`sql_to_dbml.py` accepts only two statement shapes as input — `CREATE TABLE ... AS SELECT` / `CREATE [OR REPLACE] VIEW ... AS SELECT` (CTAS/CTAV) and a plain `CREATE TABLE name (column type, ...)` (no `AS SELECT`) — not arbitrary SQL (`INSERT`, `MERGE`, `ALTER`, multi-statement transactions, etc.). The restriction was chosen deliberately, for two reasons:
-
-- **A narrow, predictable grammar.** Both accepted forms are each one well-known statement shape: CTAS/CTAV (`CREATE ... AS SELECT ... FROM ... [JOIN ...]* [GROUP BY ...]`), whose parsing (`sqlglot`) is limited to walking a single `SELECT` tree — the target table, source tables, join types, and `GROUP BY` columns are all directly extractable from the tree's structure; and a plain `CREATE TABLE`, where columns and types are read straight from the DDL's column list, needing no inference at all. Supporting other statements (e.g. an `INSERT INTO` an existing table, or complex CTE chains) would bring significantly more ambiguous cases with no matching benefit at this stage.
-- **Fail clearly, don't guess.** If the given SQL doesn't match either shape, the tool prints an error and proposes nothing — the same principle as in `validate_dbml.py`. No partial or uncertain updates.
-
-Plain `CREATE TABLE` support was added alongside CTAS/CTAV because some tables in the model (e.g. the bronze layer) are raw, ingested data with no SQL source at all — the CTAS/CTAV restriction would have left them completely outside this tool's reach even though their structure is directly readable from their own DDL.
-
-**Gaps the restriction doesn't solve, because they aren't a SQL problem but a missing-information problem:**
-- A `notebook` path can never be derived from SQL — it's orchestration metadata that neither statement shape contains in any form. The tool always marks it `TODO`, never guesses.
-- `source table` is inferred from the source tables for CTAS/CTAV statements, but for a plain `CREATE TABLE` there's nothing to infer it from (no `SELECT` source) — always `TODO`.
-- The type of computed/aggregated columns (`SUM(...)`, `DATE_TRUNC(...)`, etc.) isn't explicit in a CTAS/CTAV's `SELECT` list — the tool infers the type from the source column if it's found in the given DBML source, otherwise marks it `varchar` + `[note: 'TODO: verify type']`. Plain `CREATE TABLE` columns don't have this gap, since the type always comes straight from the DDL.
-
-Because of all these gaps, the tool never writes directly to the `.dbml` file (see Tools) — a proposal always has to be reviewed before pasting it in.
-
-### Documentation vs. a runnable system: where this repo sits
-
-Describing a data model as text/code spans many maturity levels, and this repo deliberately sits at the lightest end:
-
-- **Hand-maintained static documentation** (markdown tables, wiki pages) — no validation, drifts from the truth over time.
-- **This repo (DBML + guardrails)** — code-shaped, validatable, but deliberately **not runnable**: the scripts only read the model and generate views (validation, lineage), never write it back or sync it to any live system. The agent instructions (`AGENTS.md`) explicitly forbid inventing metadata (`TODO` as an exact string instead of guessing).
-- **dbt / SQLMesh** — the documentation (`sources.yml`/lineage graph) is wired into a real, runnable transformation pipeline; the model AND the pipeline are the same code.
-- **Rayfin** ([Microsoft Fabric Apps SDK](https://learn.microsoft.com/en-us/javascript/api/fabric-apps-sdk-javascript/rayfin-overview)) and Databricks' [Vibe Data Modeling](https://www.databricks.com/blog/reimagining-data-modeling-lakehouse-introducing-vibe-data-modeling) — the schema is defined as code (TypeScript decorators, or a `model.json` generated from a prompt), and the tool **provisions a live database, an API, and permission policies** straight from it. The model no longer describes the system — the model *is* the system.
-
-The further along this spectrum you go, the more tightly the model and the live system are coupled — useful when the goal is genuinely to run something, but it brings deploy risk, an infrastructure dependency, and a bigger blast radius for "wrong info is now in production." This repo's need was different: document and visualize a (possibly still just planned) Lakehouse model lightly, without the documentation itself ever being able to accidentally change anything real — that's why the lighter, deliberately decoupled end of the spectrum was chosen, not because the heavier options were unknown.
-
-A second, orthogonal axis is **one-off vs. deterministic generation**. [Archify](https://tt-a1i.github.io/archify/) (an agent skill for Claude Code/Cursor/Codex, among other things generating ETL/lineage diagrams in its "data-flow" mode) generates a diagram fresh from a natural-language prompt, by the agent's own interpretation, every time — fast, but with no structured, versioned source of truth and no guardrails stopping the agent from filling gaps with guesses. This repo deliberately does the same thing differently: the diagram (`lineage.py`) is always generated the same way from the same, validatable `dbml/schema.dbml` file, and `AGENTS.md` explicitly forbids the agent from guessing missing metadata (`TODO` instead of a guess) — reproducibility and guardrails were chosen over free-form speed.
+Every structural choice here — plain `.dbml` over a markdown fence or Mermaid `erDiagram`, why `sql_to_dbml.py` accepts only two statement shapes, why the repo stops short of dbt, Databricks' Vibe Data Modeling or Fabric's Rayfin — is written down with its alternatives in [DECISIONS.md](DECISIONS.md). You don't need it to use the repo; it's there so a settled decision isn't quietly reopened.
 
 ## Structure
 
@@ -135,99 +88,50 @@ A second, orthogonal axis is **one-off vs. deterministic generation**. [Archify]
   - `copy_dbml.py` — copies the DBML source's content to the clipboard (Windows) to paste into dbdiagram.io
   - `preview_md.py` — wraps the DBML source in a ` ```dbml ` code block (`generated/preview.md`), e.g. for an Obsidian preview
   - `lineage.py` — generates a Mermaid lineage diagram (upstream source → notebook/pipeline/stored procedure → table, FK relations, `TableGroup` layers — generic, not tied to Lakehouse vocabulary) from the `Note` fields; not a parallel source of truth, just a generated view
-  - `sql_to_dbml.py` — proposes a DBML table from SQL `CREATE TABLE/VIEW ... AS SELECT` or plain `CREATE TABLE` statements (see Tools and Why we ended up here); doesn't write directly, only prints a proposal
+  - `sql_to_dbml.py` — proposes a DBML table from SQL `CREATE TABLE/VIEW ... AS SELECT` or plain `CREATE TABLE` statements (see Tools); doesn't write directly, only prints a proposal
 - `generated/` — every view the scripts produce (`lineage.md`, `lineage.html`, `preview.md`). The contents are gitignored and are not a source of truth; only an empty `.gitkeep` is versioned, to keep the output location visible in the repo.
 - `examples/` — standalone example models, not part of the `dbml/` folder's source of truth. `generic_rdbms.dbml` proves the model/scripts generalize beyond a Lakehouse context (see Generality above).
 - `docs/img/` — static images used by this README. Refreshed by hand, unlike `generated/`.
 - `tests/` — pytest tests for the scripts (see Testing below)
+- [DECISIONS.md](DECISIONS.md) — why the repo is built this way, and the alternatives that were rejected
 - [requirements.txt](requirements.txt) — runtime dependencies (`pydbml`, `sqlglot`)
 - [requirements-dev.txt](requirements-dev.txt): dev/test dependencies (`pytest`), kept separate from the above
 - [LICENSE](LICENSE): MIT
 
 ## Getting started
 
-Each script below has its own runnable example to get you started.
+Every line below is either a `#` comment or a command you can run as-is.
 
-Bash
 ```bash
-# Virtual environment (once) — packages install into the .venv folder, not the machine's global Python install
+# Once: a virtual environment, so packages land in .venv and not in your global Python
 python -m venv .venv
-source .venv/Scripts/activate
+source .venv/Scripts/activate      # PowerShell: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
-# Syntax validation
+# Check the model parses
 python scripts/validate_dbml.py
 
-# Copy the DBML code to the clipboard (to paste into e.g. the dbdiagram.io editor)
-python scripts/copy_dbml.py
-
-# New table skeleton to the terminal (paste the output into dbml/schema.dbml yourself)
-python scripts/new_table.py --name dim_example --source bronze.Example --notebook orchestration_notebooks/nb_dim_example
-
-# SQL DDL to the terminal (rarely needed, not part of normal editing)
-python scripts/export_sql.py
-
-# SQL DDL to a file
-python scripts/export_sql.py -o generated/schema.sql
-
-# Markdown preview (wrapped in a dbml code block), e.g. for Obsidian
-python scripts/preview_md.py
-
-# Data lineage diagram as a Mermaid code block (Obsidian/GitHub render it natively)
+# Lineage diagram: a Mermaid block for GitHub/Obsidian, or an interactive page
 python scripts/lineage.py -o generated/lineage.md
-
-# Data lineage as a standalone interactive HTML page (open with a double-click in a browser)
 python scripts/lineage.py -o generated/lineage.html
 
-# SQL-to-DBML proposal (experimental, only prints the proposal, writes nothing)
-python scripts/sql_to_dbml.py path/to/file.sql
-
-# Same, but also copies the printed proposals to the clipboard
-python scripts/sql_to_dbml.py path/to/file.sql --clipboard
-```
-
-PowerShell
-```ps1
-# Virtual environment (once) — packages install into the .venv folder, not the machine's global Python install
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-
-# In a new terminal session, the install is already done — just the activation line is needed:
-# .venv\Scripts\Activate.ps1
-
-# Syntax validation
-python scripts/validate_dbml.py
-
-# Copy the DBML code to the clipboard (to paste into the dbdiagram.io editor)
-python scripts/copy_dbml.py
-
-# New table skeleton to the terminal (paste the output into dbml/schema.dbml yourself)
+# Scaffold a new table (prints a skeleton — you paste it in yourself)
 python scripts/new_table.py --name dim_example --source bronze.Example --notebook orchestration_notebooks/nb_dim_example
 
-# SQL DDL to the terminal (rarely needed, not part of normal editing)
-python scripts/export_sql.py
-
-# SQL DDL to a file
-python scripts/export_sql.py -o generated/schema.sql
-
-# Markdown preview (wrapped in a dbml code block), e.g. for Obsidian
-python scripts/preview_md.py
-
-# Data lineage diagram as a Mermaid code block (Obsidian/GitHub render it natively)
-python scripts/lineage.py -o generated/lineage.md
-
-# Data lineage as a standalone interactive HTML page (open with a double-click in a browser)
-python scripts/lineage.py -o generated/lineage.html
-
-# SQL-to-DBML proposal (experimental, only prints the proposal, writes nothing)
+# Propose a table from SQL (prints a proposal, writes nothing; --clipboard also copies it)
 python scripts/sql_to_dbml.py path/to/file.sql
 
-# Same, but also copies the printed proposals to the clipboard
-python scripts/sql_to_dbml.py path/to/file.sql --clipboard
+# Copy the DBML to the clipboard, e.g. for the dbdiagram.io editor
+python scripts/copy_dbml.py
+
+# Markdown preview (a dbml code fence), e.g. for Obsidian
+python scripts/preview_md.py
+
+# SQL DDL, only when you actually need it
+python scripts/export_sql.py -o generated/schema.sql
 ```
 
-`copy_dbml.py` defaults to `dbml/schema.dbml` and removes `color`/`headercolor` settings, since dbdiagram.io's free tier doesn't support them (`--keep-colors` preserves them).
+Every one of these takes an optional DBML source — a file, a folder, or a list — and defaults to `dbml/schema.dbml` (see Tools).
 
 ## Testing
 

@@ -10,13 +10,12 @@ The one thing worth repeating, because every other decision follows from it: **d
 
 ## Decisions not recorded elsewhere
 
-README § Why we ended up here already covers the plain `.dbml` file, the mandatory `Note` field, the `mechanism:` line, and `sql_to_dbml.py`'s two accepted statement shapes — not repeated here. What's left:
+`DECISIONS.md` already covers the structural choices — the plain `.dbml` file, the rejected alternatives, `sql_to_dbml.py`'s two accepted statement shapes, and where this repo sits on the documentation-vs-runnable spectrum. Not repeated here. What's left:
 
 1. **Bronze was modeled as real `Table` blocks**, not as text references inside the silver layer's Notes, so a lineage path starts from a node that actually exists in the model. Their `source table:` values are generic `source_system.*` names — this model is an illustration, not a real system.
 2. **`lineage.html`'s "Orchestration" subgraph was removed** — orchestration nodes are free-standing (own shape + color via a per-node `classDef`), because the forced wrapper competed with the natural flow layout and added no identity that shape + color didn't already give.
-3. **The competitive landscape was checked deliberately**, not skipped: DBML's native `Dep` syntax (2026-08), Databricks' Vibe Data Modeling, Microsoft Fabric's Rayfin SDK. Conclusion in README § "Documentation vs. a runnable system: where this repo sits" — this repo sits at the lightest, non-runnable end on purpose.
-4. **Arrowheads are never dropped from a lineage edge.** A thin arrow marks the hop into an orchestration node (a read) and a thick one the hop out of it (a write), but both keep their head — in Mermaid's layout an edge often passes under an unrelated node, and the arrowhead at the target is the only cue separating "ends here" from "passes by". An arrowless `---` input hop was considered and rejected for exactly that reason.
-5. **`AGENTS.md` is written against a context-engineering test**: every line has to earn its place — "would a strong model behave worse without this?" That's why it carries rules rather than a script list that would need manual upkeep.
+3. **The competitive landscape was checked deliberately**, not skipped: DBML's native `Dep` syntax (2026-08), Databricks' Vibe Data Modeling, Microsoft Fabric's Rayfin SDK. Conclusion in `DECISIONS.md` § Documentation vs. a runnable system — this repo sits at the lightest, non-runnable end on purpose.
+4. **`AGENTS.md` is written against a context-engineering test**: every line has to earn its place — "would a strong model behave worse without this?" That's why it carries rules rather than a script list that would need manual upkeep.
 
 ## Open items
 

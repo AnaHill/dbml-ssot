@@ -6,7 +6,7 @@ This file is the project's canonical guide for all AI coding agents (Claude Code
 
 Lightweight, AI-assisted data architecture documentation as DBML. The format and the scripts are **generic** — not tied to a Lakehouse, Databricks, or any specific architecture (see README § Generality and [examples/generic_rdbms.dbml](examples/generic_rdbms.dbml), which proves the same thing works for a plain relational database with the exact same, unmodified scripts). This repo's own current model (`dbml/schema.dbml`) illustrates a Fabric/Databricks-style Lakehouse architecture (bronze/silver/gold) as an example — every reference below to bronze/silver/gold layers, notebooks, etc. concerns THIS current example model, not a general requirement of the tooling. The goal is **documentation, not a runnable system** — no production SQL is generated automatically from the model, and it isn't synced to any live database.
 
-Background and rationale for the alternatives: [README.md](README.md).
+How the tools are used: [README.md](README.md). Why the repo is built this way, with the alternatives that were rejected: [DECISIONS.md](DECISIONS.md).
 
 ## Single source: dbml/
 
@@ -95,7 +95,7 @@ Changes are made directly to the DBML source (see When adding or editing tables)
 
 ## SQL-to-DBML proposal (experimental)
 
-`python scripts/sql_to_dbml.py <sql-file> [--dbml <dbml-source>]` proposes a DBML `Table` block from two kinds of SQL statements: `CREATE TABLE ... AS SELECT` / `CREATE [OR REPLACE] VIEW ... AS SELECT` (CTAS/CTAV, column types inferred from the source tables) and a plain `CREATE TABLE name (column type, ...)` (no `AS SELECT`, columns read straight from the DDL — intended for raw/ingested source tables that have no SQL source, e.g. the bronze layer in a Lakehouse or a staging/raw table in any other architecture). Accepts only these two statement shapes — any other SQL is rejected with an error and nothing is updated. Never writes directly to the `.dbml` file and never overwrites an existing table (it only reports that it's already in the model). Full description and rationale: [README.md](README.md) § Tools and § Why we ended up here.
+`python scripts/sql_to_dbml.py <sql-file> [--dbml <dbml-source>]` proposes a DBML `Table` block from two kinds of SQL statements: `CREATE TABLE ... AS SELECT` / `CREATE [OR REPLACE] VIEW ... AS SELECT` (CTAS/CTAV, column types inferred from the source tables) and a plain `CREATE TABLE name (column type, ...)` (no `AS SELECT`, columns read straight from the DDL — intended for raw/ingested source tables that have no SQL source, e.g. the bronze layer in a Lakehouse or a staging/raw table in any other architecture). Accepts only these two statement shapes — any other SQL is rejected with an error and nothing is updated. Never writes directly to the `.dbml` file and never overwrites an existing table (it only reports that it's already in the model). Full description: [README.md](README.md) § Tools. Why the input is restricted to these two shapes: [DECISIONS.md](DECISIONS.md).
 
 If you use/paste this output into a `.dbml` file: the `notebook` field is always `TODO`, and for plain `CREATE TABLE` tables so is `source table` (there's no SQL source to infer it from) — fill these in yourself, don't invent values (see When adding or editing tables, point 2). Check every column marked `[note: 'TODO: verify type']` (only possible on CTAS/CTAV proposals) and fix the actual type before considering the table done — these are gaps that can't be inferred from SQL, not bugs in the script.
 
@@ -103,4 +103,4 @@ If you use/paste this output into a `.dbml` file: the `notebook` field is always
 
 The repo structure (`dbml/`, `scripts/`, `generated/`, `examples/`, `tests/`, dependency files) is described in more detail in [README.md](README.md)'s Structure section — not repeated here.
 
-One rule especially relevant to an agent: don't edit `README.md`'s `## Why we ended up here` section without the user asking for it; it's decision history, not editable documentation.
+One rule especially relevant to an agent: don't edit [DECISIONS.md](DECISIONS.md) without the user asking for it; it's decision history, not editable documentation. Add to it only when a new decision is actually made.
