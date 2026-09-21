@@ -81,7 +81,7 @@ If you add an entirely new script meant to be run directly as `python scripts/ne
 
 ## Visual review
 
-Changes are made directly to the DBML source (see When adding or editing tables) — dbdiagram.io is no longer the primary route; the model is now mostly just viewed visually: directly reviewing the `.dbml` file's ERD structure with a VS Code extension (see [README.md](README.md) § Decision), or reviewing the lineage diagram with `python scripts/lineage.py -o generated/lineage.html` (see Data lineage diagram).
+Changes are made directly to the DBML source (see When adding or editing tables) — dbdiagram.io is no longer the primary route; the model is now mostly just viewed visually: directly reviewing the `.dbml` file's ERD structure with a VS Code extension (see [README.md](README.md) § Tools), or reviewing the lineage diagram with `python scripts/lineage.py -o generated/lineage.html` (see Data lineage diagram).
 
 `python scripts/copy_dbml.py` is still available in case you occasionally want to do an interactive, click-based edit in [dbdiagram.io](https://dbdiagram.io) (renaming with its references, changing a relation's cardinality) — it copies the DBML source's content (default `dbml/schema.dbml`) to the clipboard. If you paste updated DBML back from there, replace the source file's entire content with it as-is.
 
