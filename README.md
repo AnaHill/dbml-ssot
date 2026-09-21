@@ -6,15 +6,13 @@ A data architecture described as code in one place — readable by a human, safe
 - **Human-friendly both ways.** Edit the text directly in your editor, or view it as an ERD or an interactive lineage diagram.
 - **Built for an agent to maintain.** DBML is compact text an LLM reads well, and [AGENTS.md](AGENTS.md) sets the guardrails it works under.
 
-## Decision
+## How it works
 
-The data model is described **in the `dbml/` folder**, as plain DBML code — no markdown wrapper, no parallel SQL file that a human or an agent would have to keep in sync by hand. `dbml/schema.dbml` is the model's single source of truth — one file for as long as it stays a manageable size, but every script also supports splitting it across several files in the same folder (see Tools below).
+The model lives in `dbml/` as plain DBML — one file while that stays manageable, split across several files in the same folder when it doesn't. You edit those files directly, and every tool here either reads them or generates a view from them; none of them writes back. [dbdiagram.io](https://dbdiagram.io) is the one exception, for click-based edits like renaming a table along with its references: copy the code over, edit, paste the result back.
 
-- **Visual/low-code editing** (renaming a table along with its references, changing a relation's cardinality by clicking, colors): [dbdiagram.io](https://dbdiagram.io). `python scripts/copy_dbml.py` copies the code to the clipboard for pasting in; after editing, the updated DBML is copied back into `dbml/schema.dbml`.
-- **Local graphical preview** (optional, view-only — editing always happens directly in the `dbml/` files): primarily the VS Code extension [DBML ERD Visualizer](https://marketplace.visualstudio.com/items?itemName=bocovo.dbml-erd-visualizer) (reads the `.dbml` file directly in the editor, no script needed). Alternatives: [dbdiagram.io's official VS Code extension](https://docs.dbdiagram.io/vs-code-extension/) (basic use — syntax highlighting + ERD preview — is local), or Obsidian + the [DBML Visualizer](https://community.obsidian.md/plugins/dbml-visualizer) plugin. If a tool specifically needs a markdown-wrapped code block (like the Obsidian plugin), `python scripts/preview_md.py` generates one (`generated/preview.md`) — not versioned as a separate source of truth, just a generated view.
-- **SQL DDL** is generated only when needed (`scripts/export_sql.py`), not automatically. The goal right now isn't to run a live system from this model.
-- **Syntax validation**, a **data lineage diagram**, and a **new-table scaffold** are handled by Python scripts in `scripts/`, without needing an agent for every change.
-- **Agent guardrails** live in [AGENTS.md](AGENTS.md): never invent a source table or an orchestrating job — write the exact string `TODO`, which the lineage diagram then flags in its own warning style; propose rather than write straight into the model; and let validation and the test suite decide when a change is done.
+Nothing is generated behind your back either. The lineage diagram, the markdown preview and the SQL DDL are produced when you ask for them, because the goal is documentation rather than a running system — [DECISIONS.md](DECISIONS.md) explains why the repo deliberately stops there.
+
+**Agent guardrails** live in [AGENTS.md](AGENTS.md): never invent a source table or an orchestrating job — write the exact string `TODO`, which the lineage diagram then flags in its own warning style; propose rather than write straight into the model; and let validation and the test suite decide when a change is done.
 
 ## Tools
 
@@ -32,7 +30,7 @@ Commands:
 
 - **Syntax validation**: `python scripts/validate_dbml.py`
 - **Editing in dbdiagram.io**: `python scripts/copy_dbml.py` copies the DBML source's content to the clipboard (removes `color`/`headercolor` settings by default, since dbdiagram.io's free tier doesn't support them — `--keep-colors` preserves them).
-- **Graphical ERD preview (VS Code)**: install the [DBML ERD Visualizer](https://marketplace.visualstudio.com/items?itemName=bocovo.dbml-erd-visualizer) extension and open `dbml/schema.dbml` — the preview opens in a side panel with a click, no script needed (see Decision for other options).
+- **Graphical ERD preview (VS Code)**: install the [DBML ERD Visualizer](https://marketplace.visualstudio.com/items?itemName=bocovo.dbml-erd-visualizer) extension and open `dbml/schema.dbml` — the preview opens in a side panel with a click, no script needed (other options, and why this one: [DECISIONS.md](DECISIONS.md)).
 - **Local markdown preview**: `python scripts/preview_md.py` generates `generated/preview.md` (a ` ```dbml ` wrapper), e.g. for Obsidian.
 - **SQL DDL when needed**: `python scripts/export_sql.py [-o file.sql]`
 - **New table skeleton**: `python scripts/new_table.py --name dim_x --source bronze.X --notebook <path>`
@@ -135,25 +133,12 @@ Every one of these takes an optional DBML source — a file, a folder, or a list
 
 ## Testing
 
-The scripts in `scripts/` have pytest tests in `tests/`:
-
-```
-# Once
+```bash
 pip install -r requirements.txt -r requirements-dev.txt
-
-# Whenever scripts/ changes
 pytest
 ```
 
-The tests fall into two types:
-- **Unit tests** for pure logic that already exists as separate functions (`lineage.py`'s `Lineage` class and helper functions, `copy_dbml.py`'s `strip_colors()`, `_dbml_source.py`'s path resolution) — imported directly via the `sys.path` entry `tests/conftest.py` adds, no changes to the scripts needed.
-- **Integration tests** for the CLI scripts (`validate_dbml.py`, `export_sql.py`, `new_table.py`, `preview_md.py`) — run as a real CLI command via `subprocess` against DBML files in `tests/fixtures/`, checking the exit code + the output content. Includes regression tests for the file/folder/list input resolution (see `tests/fixtures/dbml_dir/`).
-
-`sql_to_dbml.py` gets both kinds in one file (`tests/test_sql_to_dbml.py`): unit tests for its pure helper functions (calling `sqlglot` directly), plus integration tests for the CLI as a subprocess — it's the one script substantial enough to warrant its own combined test file rather than fitting neatly into either bullet above.
-
-**Deliberately left out:** `copy_dbml.py`'s and `sql_to_dbml.py --clipboard`'s actual clipboard writing (calls PowerShell — a Windows-specific side effect) and `lineage.py`'s interactive HTML working in a real browser (needs an actual browser, not something pytest could substitute).
-
-Run the tests whenever you change anything in `scripts/`, before considering the change done.
+Unit tests cover the pure logic (the lineage graph and its legend, color stripping, DBML source resolution); integration tests run each CLI as a real subprocess against the fixtures in `tests/`. Deliberately untested: the actual clipboard write, a Windows-specific PowerShell side effect, and the interactive HTML in a real browser — neither is something pytest could stand in for. Run `pytest` after any change under `scripts/`, before calling it done.
 
 ## For later (not done yet, not critical now)
 
