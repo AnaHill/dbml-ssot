@@ -16,7 +16,7 @@ Project end_to_end_example {
   '''
 }
 
-TableGroup snowflake_stage [color: #C9E4DE] {
+TableGroup snowflake_stage [color: #C9E4DE, note: 'parent: Snowflake'] {
   stage.customer
   stage.order
   stage.order_line

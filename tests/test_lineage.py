@@ -288,6 +288,67 @@ def test_legend_shows_todo_entry_when_lineage_is_missing():
     assert "TODO" in html
 
 
+PARENT_FIXTURE = """
+TableGroup wh_stage [color: #C9E4DE, note: 'parent: Snowflake'] {
+  stage.a
+}
+TableGroup wh_publish [color: #A3D5C8, note: 'parent: Snowflake'] {
+  publish.b
+}
+TableGroup app_db [color: #C6E2FF] {
+  app.c
+}
+Table stage.a {
+  id integer [pk]
+  Note: '''
+    source table: crm.Account
+    notebook: nb_a
+  '''
+}
+Table publish.b {
+  id integer [pk]
+  Note: '''
+    source table: stage.a
+    notebook: nb_b
+  '''
+}
+Table app.c {
+  id integer [pk]
+  Note: '''
+    source table: publish.b
+    notebook: nb_c
+  '''
+}
+"""
+
+
+def test_parse_group_parent_reads_the_note_line():
+    db = PyDBML(PARENT_FIXTURE)
+    parents = {g.name: lineage.parse_group_parent(g) for g in db.table_groups}
+    assert parents == {"wh_stage": "Snowflake", "wh_publish": "Snowflake", "app_db": None}
+
+
+def test_groups_sharing_a_parent_render_inside_one_subgraph():
+    lin = lineage.Lineage(PyDBML(PARENT_FIXTURE))
+    text = lineage.render_mermaid(lin)
+
+    assert 'subgraph parent_Snowflake["Snowflake"]' in text
+    # Both children are nested one level deeper than an unparented group.
+    assert '    subgraph wh_stage["wh_stage"]' in text
+    assert '    subgraph wh_publish["wh_publish"]' in text
+    assert '  subgraph app_db["app_db"]' in text
+    # The container draws a boundary only — the colors stay on the groups.
+    assert "style parent_Snowflake fill:none" in text
+
+
+def test_group_without_parent_is_unchanged():
+    """A model that uses no `parent:` line must render exactly as before."""
+    lin = lineage.Lineage(PyDBML(ANIMATION_FIXTURE))
+    text = lineage.render_mermaid(lin)
+
+    assert "subgraph parent_" not in text
+
+
 def test_layer_list_includes_source_and_orchestration_layers():
     lin = lineage.Lineage(PyDBML(ANIMATION_FIXTURE))
     ids = [layer["id"] for layer in lineage.layer_list(lin)]

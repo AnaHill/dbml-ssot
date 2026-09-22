@@ -1,4 +1,4 @@
-TableGroup snowflake_publish [color: #A3D5C8] {
+TableGroup snowflake_publish [color: #A3D5C8, note: 'parent: Snowflake'] {
   publish.dim_customer
   publish.dim_product
   publish.fact_order_line

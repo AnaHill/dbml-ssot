@@ -61,6 +61,28 @@ def mermaid_id(text: str) -> str:
     return ident
 
 
+def parse_group_parent(group) -> str | None:
+    """The optional `parent:` line in a TableGroup's own note, naming a
+    container the group belongs to — a platform, a domain, an owner.
+
+    Two TableGroups sharing a parent are drawn inside one outer box:
+
+        TableGroup snowflake_stage [note: 'parent: Snowflake'] { ... }
+
+    Stated explicitly rather than inferred from the group's name, for the
+    same reason `mechanism:` is (see DECISIONS.md): a naming convention
+    that happens to hold in one file is not a rule.
+    """
+    note = getattr(group, "note", None)
+    text = getattr(note, "text", None) or ""
+    for line in text.splitlines():
+        line = line.strip()
+        if line.lower().startswith("parent:"):
+            value = line.split(":", 1)[1].strip()
+            return value or None
+    return None
+
+
 def full_name(table) -> str:
     return f"{table.schema}.{table.name}" if table.schema else table.name
 
@@ -168,6 +190,7 @@ class Lineage:
                     "name": group.name,
                     "color": group.color,
                     "tables": table_ids_in_group,
+                    "parent": parse_group_parent(group),
                 }
             )
 
@@ -224,13 +247,41 @@ def render_mermaid(lin: Lineage, interactive: bool = False) -> str:
             mechanism = lin.orch_mechanism.get(nid, "notebook")
             lines.append(f"  class {nid} mech_{mermaid_id(mechanism)}")
 
-    for group in lin.groups:
-        lines.append(f'  subgraph {group["id"]}["{group["name"]}"]')
+    # Groups sharing a `parent:` are wrapped in one outer subgraph, in the
+    # order the first of them appears — so a platform split across several
+    # schemas reads as one box instead of two unrelated ones.
+    styles: list[str] = []
+
+    def render_group(group: dict, indent: str) -> None:
+        lines.append(f'{indent}subgraph {group["id"]}["{group["name"]}"]')
         for tid in group["tables"]:
-            lines.append(f'    {tid}["{lin.table_labels[tid]}"]')
-        lines.append("  end")
+            lines.append(f'{indent}  {tid}["{lin.table_labels[tid]}"]')
+        lines.append(f"{indent}end")
         if group["color"]:
-            lines.append(f"  style {group['id']} fill:{group['color']}33,stroke:#666")
+            styles.append(f"  style {group['id']} fill:{group['color']}33,stroke:#666")
+
+    rendered: set[str] = set()
+    for group in lin.groups:
+        if group["id"] in rendered:
+            continue
+        parent = group.get("parent")
+        if not parent:
+            render_group(group, "  ")
+            rendered.add(group["id"])
+            continue
+
+        siblings = [g for g in lin.groups if g.get("parent") == parent]
+        parent_id = mermaid_id(f"parent_{parent}")
+        lines.append(f'  subgraph {parent_id}["{parent}"]')
+        for sibling in siblings:
+            render_group(sibling, "    ")
+            rendered.add(sibling["id"])
+        lines.append("  end")
+        # No fill: the container only draws a boundary, leaving the colors
+        # to the groups inside it.
+        styles.append(f"  style {parent_id} fill:none,stroke:#999,stroke-dasharray: 4 4")
+
+    lines.extend(styles)
 
     for tid in lin.ungrouped_ids:
         lines.append(f'  {tid}["{lin.table_labels[tid]}"]')
