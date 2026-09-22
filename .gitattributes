@@ -1,0 +1,7 @@
+# Store LF in the repository and check out LF everywhere, regardless of the
+# contributor's platform. Without this, a Windows clone gets CRLF and every
+# file looks modified the moment someone on Linux or macOS touches it.
+* text=auto eol=lf
+
+# Never normalize binary content.
+*.png binary
