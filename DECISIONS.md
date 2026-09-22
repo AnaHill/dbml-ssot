@@ -67,6 +67,21 @@ The further along this spectrum you go, the more tightly the model and the live 
 
 A second, orthogonal axis is **one-off vs. deterministic generation**. [Archify](https://tt-a1i.github.io/archify/) (an agent skill for Claude Code/Cursor/Codex, among other things generating ETL/lineage diagrams in its "data-flow" mode) generates a diagram fresh from a natural-language prompt, by the agent's own interpretation, every time — fast, but with no structured, versioned source of truth and no guardrails stopping the agent from filling gaps with guesses. This repo deliberately does the same thing differently: the diagram (`lineage.py`) is always generated the same way from the same, validatable `dbml/schema.dbml` file, and `AGENTS.md` explicitly forbids the agent from guessing missing metadata (`TODO` instead of a guess) — reproducibility and guardrails were chosen over free-form speed.
 
+## ERD Studio: the closest neighbour, and why this still exists
+
+[ERD Studio](https://github.com/liam-machine/erd-studio) ([VS Code extension](https://marketplace.visualstudio.com/items?itemName=liamwynne.erd-studio)) is the nearest thing to this repo found so far: a visual ERD designer that keeps the model in your repository as plain files, explicitly so an AI assistant can read it. It is worth knowing about before reaching for anything here, and for some projects it is the better choice.
+
+**Where it is genuinely ahead:** it edits on a canvas with two-way sync back to the files, which this repo does not do at all — click-based editing here is delegated to dbdiagram.io through a copy-paste round trip. It also compares the logical design against what dbt actually built (`manifest.json`, `catalog.json`) and reports the drift, which is a kind of verification this repo deliberately does not attempt.
+
+**Why it doesn't replace this:**
+
+- **It is built around dbt.** Its core value needs a `dbt_project.yml`; without one it drops to a logical-only mode. This repo's `notebook:` line is free text precisely so an ADF pipeline, a Fabric notebook or a stored procedure counts as an orchestrating mechanism.
+- **"Lineage" means a different thing in each.** There it means design-vs-built drift. Here it means upstream source → process → table, across platform boundaries. They are not two solutions to one problem.
+- **Format portability.** DBML is read by dbdiagram.io, `sql2dbml` and several viewers; ERD Studio's YAML/JSON schema lives in ERD Studio.
+- **Licence.** ERD Studio is PolyForm Shield 1.0.0 — free to use, including commercially, but it forbids building a competing product. That is source-available, not open source. This repo is MIT, so it can be forked and built on without that question arising.
+
+Summary: on a dbt project that wants visual modeling, ERD Studio probably does more. This repo earns its place when the stack isn't dbt, when the format and licence need to stay open, or when what needs documenting is where the data came from rather than how the tables are shaped.
+
 ## Arrowheads are never dropped from a lineage edge
 
 A thin arrow marks the hop into an orchestration node (the process reads that table) and a thick one the hop out of it (the process populates that table), but both keep their arrowhead. In Mermaid's layout an edge often passes under an unrelated node on its way to its own target, and the arrowhead is the only cue separating "this edge ends here" from "this edge just passes by". An arrowless `---` input hop was considered and rejected for exactly that reason: it would have made lineage harder to follow, not easier.
