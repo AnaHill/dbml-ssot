@@ -1,0 +1,84 @@
+Project end_to_end_example {
+  database_type: 'Multi-platform (source systems → PostgreSQL → Snowflake → Power BI)'
+  Note: '''
+    One architecture split across four files, one per platform. Not part of the
+    dbml/ folder's source of truth — an example of what a real engagement looks
+    like when the data crosses platform boundaries.
+
+    Render the whole chain with:
+      python scripts/lineage.py examples/end_to_end -o generated/end_to_end.html
+  '''
+}
+
+TableGroup source_systems [color: #E8D3A9] {
+  crm.customer
+  webshop.order
+  webshop.order_line
+  erp.product
+  legacy.pricelist
+}
+
+Table crm.customer {
+  customer_id    integer   [pk]
+  customer_name  varchar
+  email          varchar
+  country_code   varchar
+
+  Note: '''
+    source table: salesforce.Account (REST API)
+    notebook: adf_pipelines/pl_export_salesforce
+    mechanism: pipeline
+  '''
+}
+
+Table webshop.order {
+  order_id     integer   [pk]
+  customer_id  integer   [ref: > crm.customer.customer_id]
+  order_date   date
+  status       varchar
+
+  Note: '''
+    source table: shopify.orders (REST API)
+    notebook: adf_pipelines/pl_export_shopify
+    mechanism: pipeline
+  '''
+}
+
+Table webshop.order_line {
+  order_line_id  integer   [pk]
+  order_id       integer   [ref: > webshop.order.order_id]
+  product_id     integer   [ref: > erp.product.product_id]
+  quantity       integer
+  unit_price     decimal
+
+  Note: '''
+    source table: shopify.order_lines (REST API)
+    notebook: adf_pipelines/pl_export_shopify
+    mechanism: pipeline
+  '''
+}
+
+Table erp.product {
+  product_id    integer   [pk]
+  product_code  varchar
+  product_name  varchar
+  category      varchar
+
+  Note: '''
+    source table: dynamics.Products
+    notebook: adf_pipelines/pl_export_dynamics
+    mechanism: pipeline
+  '''
+}
+
+Table legacy.pricelist {
+  product_id   integer   [pk]
+  list_price   decimal
+  valid_from   date
+
+  Note: '''
+    source table: TODO
+    notebook: TODO
+    remark: a spreadsheet someone emails in — nobody knows who owns it yet, so both fields stay TODO instead of being guessed
+  '''
+}

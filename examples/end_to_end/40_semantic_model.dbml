@@ -1,0 +1,45 @@
+TableGroup power_bi_semantic_model [color: #FFD966] {
+  semantic.Customer
+  semantic.Product
+  semantic.Sales
+}
+
+Table semantic.Customer {
+  customer_key   integer   [pk]
+  customer_name  varchar
+  country_code   varchar
+
+  Note: '''
+    source table: warehouse.dim_customer
+    notebook: fabric_pipelines/pl_refresh_sales_model
+    mechanism: pipeline
+  '''
+}
+
+Table semantic.Product {
+  product_key   integer   [pk]
+  product_name  varchar
+  category      varchar
+
+  Note: '''
+    source table: warehouse.dim_product
+    notebook: fabric_pipelines/pl_refresh_sales_model
+    mechanism: pipeline
+  '''
+}
+
+Table semantic.Sales {
+  order_line_id  integer   [pk]
+  customer_key   integer   [ref: > semantic.Customer.customer_key]
+  product_key    integer   [ref: > semantic.Product.product_key]
+  order_date     date
+  quantity       integer
+  line_amount    decimal
+
+  Note: '''
+    source table: warehouse.fact_order_line
+    notebook: fabric_pipelines/pl_refresh_sales_model
+    mechanism: pipeline
+    remark: the measures (Total Sales, Margin %) live in the semantic model, not in this file — DBML describes the tables a report reads, not the DAX
+  '''
+}

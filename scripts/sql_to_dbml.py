@@ -109,7 +109,7 @@ def extract_ctas(stmt: exp.Expression):
     return full_table_name(table_exp), kind == "VIEW", select
 
 
-def extract_raw_create(stmt: exp.Expression):
+def extract_raw_create(stmt: exp.Expression, dialect: str = "databricks"):
     """Returns (target, columns) if stmt is a valid plain
     `CREATE TABLE name (column type, ...)` statement (no AS SELECT),
     otherwise None. columns is a list of (name, type, is_pk) read straight
@@ -139,10 +139,77 @@ def extract_raw_create(stmt: exp.Expression):
             pk_names.add(c.this.name)
 
     columns = [
-        (c.this.name, c.args.get("kind").sql(dialect="databricks").lower(), c.this.name in pk_names)
+        (c.this.name, c.args.get("kind").sql(dialect=dialect).lower(), c.this.name in pk_names)
         for c in column_defs
     ]
     return full_table_name(table_exp), columns
+
+
+def _reference_target(reference: exp.Expression) -> tuple[str, list[str]] | None:
+    """(referenced table, referenced columns) from a REFERENCES clause.
+
+    The clause appears both inline (`col int REFERENCES other(id)`) and as a
+    table/ALTER-level `FOREIGN KEY (col) REFERENCES other(id)`, and sqlglot
+    wraps it slightly differently in each case — hence the unwrapping.
+    """
+    node = reference.this if isinstance(reference, exp.Reference) else reference
+    if isinstance(node, exp.Schema) and isinstance(node.this, exp.Table):
+        return full_table_name(node.this), [c.name for c in node.expressions]
+    if isinstance(node, exp.Table):
+        return full_table_name(node), []
+    return None
+
+
+def extract_foreign_keys(stmt: exp.Expression) -> list[tuple[str, str, str, str]]:
+    """Every foreign key the statement declares, as
+    (table, column, referenced table, referenced column).
+
+    Handles the three shapes a dumped schema uses: an inline `REFERENCES` on
+    a column, a table-level `FOREIGN KEY` inside `CREATE TABLE`, and a
+    separate `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY` — the last one
+    is how pg_dump writes them, so without it a dump imports as a pile of
+    unconnected tables.
+
+    A relation that can't be read cleanly is skipped rather than guessed;
+    the caller reports the count so nothing disappears silently.
+    """
+    if isinstance(stmt, exp.Create):
+        schema = stmt.this
+        if not isinstance(schema, exp.Schema) or not isinstance(schema.this, exp.Table):
+            return []
+        table = full_table_name(schema.this)
+        members = schema.expressions
+    else:  # ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY
+        target = stmt.args.get("this")
+        if not isinstance(target, exp.Table):
+            return []
+        table = full_table_name(target)
+        members = [stmt]
+
+    fks: list[tuple[str, str, str, str]] = []
+
+    for column in (m for m in members if isinstance(m, exp.ColumnDef)):
+        for constraint in column.constraints:
+            if not isinstance(constraint.kind, exp.Reference):
+                continue
+            target_ref = _reference_target(constraint.kind)
+            if target_ref is None:
+                continue
+            ref_table, ref_columns = target_ref
+            fks.append((table, column.this.name, ref_table, (ref_columns or [column.this.name])[0]))
+
+    for member in members:
+        for fk in member.find_all(exp.ForeignKey):
+            target_ref = _reference_target(fk.args.get("reference"))
+            local = [c.name for c in fk.expressions if isinstance(c, exp.Identifier)]
+            if target_ref is None or not local:
+                continue
+            ref_table, ref_columns = target_ref
+            for idx, local_column in enumerate(local):
+                ref_column = ref_columns[idx] if idx < len(ref_columns) else local_column
+                fks.append((table, local_column, ref_table, ref_column))
+
+    return fks
 
 
 def source_description(select: exp.Select) -> str:
@@ -166,15 +233,15 @@ def build_alias_map(select: exp.Select) -> dict[str, str]:
     return {t.alias_or_name: full_table_name(t) for t in tables}
 
 
-def build_columns(select: exp.Select, alias_map: dict[str, str], columns_by_table: dict[str, dict[str, str]]):
+def build_columns(select: exp.Select, alias_map: dict[str, str], columns_by_table: dict[str, dict[str, str]], dialect: str = "databricks"):
     group = select.args.get("group")
-    group_sqls = {g.sql(dialect="databricks") for g in (group.expressions if group else [])}
+    group_sqls = {g.sql(dialect=dialect) for g in (group.expressions if group else [])}
 
     columns = []
     for proj in select.expressions:
         expr = proj.this if isinstance(proj, exp.Alias) else proj
         name = proj.alias_or_name
-        is_pk = expr.sql(dialect="databricks") in group_sqls
+        is_pk = expr.sql(dialect=dialect) in group_sqls
 
         col_type, sure = "varchar", False
         if isinstance(expr, exp.Column):
@@ -187,16 +254,24 @@ def build_columns(select: exp.Select, alias_map: dict[str, str], columns_by_tabl
     return columns
 
 
-def render_columns(columns) -> list[str]:
+def render_columns(columns, refs: dict[str, tuple[str, str]] | None = None) -> list[str]:
     """columns: a list of (name, type, is_pk, sure) — 'sure' controls
     whether '[note: TODO: verify type]' is added; for plain CREATE TABLE
     columns sure=True always, since the type comes straight from the DDL
-    and isn't an inference."""
+    and isn't an inference.
+
+    refs: {column name: (referenced table, referenced column)}, rendered as
+    an inline `ref: >` the way AGENTS.md prefers relations to be written.
+    """
+    refs = refs or {}
     lines = []
     for col_name, col_type, is_pk, sure in columns:
         settings = []
         if is_pk:
             settings.append("pk")
+        if col_name in refs:
+            ref_table, ref_column = refs[col_name]
+            settings.append(f"ref: > {ref_table}.{ref_column}")
         if not sure:
             settings.append("note: 'TODO: verify type'")
         setting_str = f"   [{', '.join(settings)}]" if settings else ""
@@ -219,12 +294,12 @@ def render_table_block(target: str, is_view: bool, columns, source_desc: str) ->
     return "\n".join(lines)
 
 
-def render_raw_table_block(target: str, columns) -> str:
+def render_raw_table_block(target: str, columns, refs: dict[str, tuple[str, str]] | None = None) -> str:
     """columns: a list of (name, type, is_pk) straight from the DDL — no
     type inference."""
     schema, _, _name = target.partition(".")
     lines = [f"Table {target} {{"]
-    lines.extend(render_columns([(n, t, pk, True) for n, t, pk in columns]))
+    lines.extend(render_columns([(n, t, pk, True) for n, t, pk in columns], refs))
     lines.append("")
     lines.extend(
         [
@@ -261,6 +336,15 @@ def main() -> int:
         action="store_true",
         help="also copy the proposals to the clipboard (Windows, PowerShell) in addition to printing",
     )
+    parser.add_argument(
+        "--skip-unsupported",
+        action="store_true",
+        help=(
+            "skip statements that aren't CTAS/CTAV or plain CREATE TABLE instead of failing, "
+            "and report what was skipped — for whole schema dumps, which also contain "
+            "SET, CREATE INDEX, COMMENT ON and the like"
+        ),
+    )
     args = parser.parse_args()
 
     try:
@@ -278,6 +362,11 @@ def main() -> int:
 
     had_error = False
     proposals = []
+    # {table: {column: (referenced table, referenced column)}} — collected
+    # across every statement, since pg_dump declares foreign keys in
+    # separate ALTER TABLE statements long after the CREATE TABLE.
+    refs_by_table: dict[str, dict[str, tuple[str, str]]] = {}
+    skipped: dict[str, int] = {}
 
     for sql_file in args.sql_files:
         try:
@@ -295,14 +384,21 @@ def main() -> int:
             continue
 
         for i, stmt in enumerate(s for s in statements if s is not None):
+            for table, column, ref_table, ref_column in extract_foreign_keys(stmt):
+                refs_by_table.setdefault(table, {})[column] = (ref_table, ref_column)
+
             ctas = extract_ctas(stmt)
-            raw = extract_raw_create(stmt) if ctas is None else None
+            raw = extract_raw_create(stmt, args.dialect) if ctas is None else None
             if ctas is None and raw is None:
+                if args.skip_unsupported:
+                    skipped[type(stmt).__name__] = skipped.get(type(stmt).__name__, 0) + 1
+                    continue
                 print(
                     f"ERROR ({sql_file}, statement {i + 1}): only accepts "
                     "'CREATE TABLE ... AS SELECT', 'CREATE [OR REPLACE] VIEW "
                     "... AS SELECT', or a plain 'CREATE TABLE name (column "
-                    "type, ...)' statement.",
+                    "type, ...)' statement. Use --skip-unsupported to skip "
+                    "statements like these and report them instead.",
                     file=sys.stderr,
                 )
                 had_error = True
@@ -325,6 +421,10 @@ def main() -> int:
         print("\nERROR: one or more statements were invalid — nothing proposed.", file=sys.stderr)
         return 1
 
+    if skipped:
+        summary = ", ".join(f"{count}x {kind}" for kind, count in sorted(skipped.items()))
+        print(f"Skipped {sum(skipped.values())} unsupported statement(s): {summary}.")
+
     if not proposals:
         print("No new tables to propose.")
         return 0
@@ -335,15 +435,19 @@ def main() -> int:
         if kind == "ctas":
             _, sql_file, target, is_view, select = proposal
             alias_map = build_alias_map(select)
-            columns = build_columns(select, alias_map, columns_by_table)
+            columns = build_columns(select, alias_map, columns_by_table, args.dialect)
             source_desc = source_description(select)
             block = render_table_block(target, is_view, columns, source_desc)
         else:
             _, sql_file, target, columns = proposal
-            block = render_raw_table_block(target, columns)
+            block = render_raw_table_block(target, columns, refs_by_table.get(target))
         print(f"\n# Proposal ({sql_file}):")
         print(block)
         blocks.append(f"# Proposal ({sql_file}):\n{block}")
+
+    relations = sum(len(cols) for cols in refs_by_table.values())
+    if relations:
+        print(f"\n# {relations} foreign key(s) read from the SQL and written inline as `ref: >`.")
 
     if args.clipboard:
         clipboard_text = "\n\n".join(blocks) + "\n"

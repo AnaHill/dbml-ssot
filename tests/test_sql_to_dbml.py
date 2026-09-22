@@ -105,6 +105,54 @@ def test_extract_raw_create_rejects_plain_select():
     assert s2d.extract_raw_create(stmt) is None
 
 
+def test_extract_foreign_keys_reads_inline_references():
+    stmt = sqlglot.parse_one(
+        "CREATE TABLE staging.orders (order_id INT PRIMARY KEY, "
+        "customer_id INT REFERENCES staging.customer(customer_id))",
+        dialect="postgres",
+    )
+    assert s2d.extract_foreign_keys(stmt) == [
+        ("staging.orders", "customer_id", "staging.customer", "customer_id")
+    ]
+
+
+def test_extract_foreign_keys_reads_table_level_constraint():
+    stmt = sqlglot.parse_one(
+        "CREATE TABLE staging.orders (order_id INT, customer_id INT, "
+        "FOREIGN KEY (customer_id) REFERENCES staging.customer(customer_id))",
+        dialect="postgres",
+    )
+    assert s2d.extract_foreign_keys(stmt) == [
+        ("staging.orders", "customer_id", "staging.customer", "customer_id")
+    ]
+
+
+def test_extract_foreign_keys_reads_alter_table_constraint():
+    """pg_dump writes every foreign key as a separate ALTER TABLE long after
+    the CREATE TABLE — without this, a dump imports as unconnected tables."""
+    stmt = sqlglot.parse_one(
+        "ALTER TABLE staging.orders ADD CONSTRAINT fk_orders_customer "
+        "FOREIGN KEY (customer_id) REFERENCES staging.customer(customer_id)",
+        dialect="postgres",
+    )
+    assert s2d.extract_foreign_keys(stmt) == [
+        ("staging.orders", "customer_id", "staging.customer", "customer_id")
+    ]
+
+
+def test_extract_foreign_keys_ignores_unrelated_statements():
+    stmt = sqlglot.parse_one("SELECT * FROM staging.orders", dialect="postgres")
+    assert s2d.extract_foreign_keys(stmt) == []
+
+
+def test_render_columns_writes_reference_inline():
+    lines = s2d.render_columns(
+        [("customer_id", "int", False, True)],
+        {"customer_id": ("staging.customer", "customer_id")},
+    )
+    assert "[ref: > staging.customer.customer_id]" in lines[0]
+
+
 def run_tool(*args, repo_root):
     return subprocess.run(
         [sys.executable, "scripts/sql_to_dbml.py", *[str(a) for a in args]],
@@ -164,6 +212,40 @@ def test_new_raw_table_is_proposed_from_ddl(fixtures_dir, repo_root):
     assert "event_id             int   [pk]" in result.stdout
     assert "TODO: verify type" not in result.stdout
     assert "source table: TODO" in result.stdout
+
+
+def test_schema_dump_fails_without_skip_flag(fixtures_dir, repo_root):
+    """The default stays strict: a dump contains SET/CREATE INDEX/ALTER, and
+    without the flag the run fails loudly rather than ignoring them."""
+    result = run_tool(
+        fixtures_dir / "pg_dump_excerpt.sql",
+        "--dialect",
+        "postgres",
+        "--dbml",
+        fixtures_dir / "valid.dbml",
+        repo_root=repo_root,
+    )
+    assert result.returncode == 1
+    assert "--skip-unsupported" in result.stderr
+
+
+def test_schema_dump_imports_tables_and_relations_with_skip_flag(fixtures_dir, repo_root):
+    result = run_tool(
+        fixtures_dir / "pg_dump_excerpt.sql",
+        "--dialect",
+        "postgres",
+        "--skip-unsupported",
+        "--dbml",
+        fixtures_dir / "valid.dbml",
+        repo_root=repo_root,
+    )
+    assert result.returncode == 0
+    assert "Table staging.customer {" in result.stdout
+    assert "Table staging.orders {" in result.stdout
+    # The foreign key lives in a separate ALTER TABLE, and still lands inline.
+    assert "[ref: > staging.customer.customer_id]" in result.stdout
+    # Skipped statements are reported, never silently dropped.
+    assert "Skipped 3 unsupported statement(s)" in result.stdout
 
 
 def test_existing_raw_table_is_not_proposed(fixtures_dir, repo_root):

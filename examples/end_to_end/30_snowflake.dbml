@@ -1,0 +1,45 @@
+TableGroup snowflake_warehouse [color: #C9E4DE] {
+  warehouse.dim_customer
+  warehouse.dim_product
+  warehouse.fact_order_line
+}
+
+Table warehouse.dim_customer {
+  customer_key   integer   [pk, increment]
+  customer_id    integer
+  customer_name  varchar
+  country_code   varchar
+
+  Note: '''
+    source table: staging.customer
+    notebook: dbt/models/marts/dim_customer.sql
+  '''
+}
+
+Table warehouse.dim_product {
+  product_key   integer   [pk, increment]
+  product_id    integer
+  product_name  varchar
+  category      varchar
+  list_price    decimal
+
+  Note: '''
+    source table: staging.product
+    notebook: dbt/models/marts/dim_product.sql
+  '''
+}
+
+Table warehouse.fact_order_line {
+  order_line_id  integer   [pk]
+  customer_key   integer   [ref: > warehouse.dim_customer.customer_key]
+  product_key    integer   [ref: > warehouse.dim_product.product_key]
+  order_date     date
+  quantity       integer
+  line_amount    decimal
+
+  Note: '''
+    source table: staging.order + staging.order_line (join)
+    notebook: dbt/models/marts/fact_order_line.sql
+    remark: grain is one row per order line, not per order
+  '''
+}

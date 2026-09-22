@@ -6,6 +6,24 @@ A data architecture described as code in one place — readable by a human, safe
 - **Human-friendly both ways.** Edit the text directly in your editor, or view it as an ERD or an interactive lineage diagram.
 - **Built for an agent to maintain.** DBML is compact text an LLM reads well, and [AGENTS.md](AGENTS.md) sets the guardrails it works under.
 
+## What it's good for
+
+Five situations this actually helps with, and how much of each is automated:
+
+- **The blank page.** A new client, nothing written down yet. You sketch tables in DBML and let an LLM fill in the obvious ones, validating as you go — `validate_dbml.py` tells you immediately whether what came back is real DBML.
+- **A logical model that exists only on a slide.** Hand it to an LLM, ask for DBML, review the result. You get a simplified first version whose columns you then grow — the validation and the `TODO` rule keep the model honest while it's still half-finished.
+- **A client hands you a 1000-table Postgres database.** Export the schema (`pg_dump -s`), run `sql_to_dbml.py --dialect postgres --skip-unsupported`, and get table blocks with the foreign keys already wired in. What the SQL can't tell you is marked `TODO`, so the lineage diagram doubles as a map of what nobody has documented yet.
+- **Snowflake or Databricks.** The same path: `GET_DDL` / `SHOW CREATE TABLE` produces the DDL, `--dialect snowflake` (or `databricks`) reads it.
+- **A Power BI semantic model.** No importer here — its TMDL/BIM files are text, so the LLM route above is the practical one: paste the model definition, ask for DBML, validate, review.
+
+The first two and the last are the same loop: an LLM proposes, `validate_dbml.py` verifies, you review. Deterministic tooling only earns its place where the volume is too large to trust a model with — which is exactly the third and fourth case.
+
+[`examples/end_to_end/`](examples/end_to_end) shows where this ends up: one architecture, four files, four platforms — source systems → PostgreSQL → Snowflake → a Power BI semantic model — with the lineage running across all of them.
+
+```bash
+python scripts/lineage.py examples/end_to_end -o generated/end_to_end.html
+```
+
 ## How it works
 
 The model lives in `dbml/` as plain DBML — one file while that stays manageable, split across several files in the same folder when it doesn't. You edit those files directly, and every tool here either reads them or generates a view from them; none of them writes back. [dbdiagram.io](https://dbdiagram.io) is the one exception, for click-based edits like renaming a table along with its references: copy the code over, edit, paste the result back.
@@ -38,7 +56,9 @@ Commands:
   1. `CREATE TABLE ... AS SELECT` / `CREATE [OR REPLACE] VIEW ... AS SELECT` (CTAS/CTAV) — column types are inferred from the source tables in the given DBML source.
   2. A plain `CREATE TABLE name (column type, ...)` (no `AS SELECT`) — columns and types are read straight from the DDL. Intended for raw/ingested tables (e.g. the bronze layer) that have no SQL source.
 
-  Any other SQL is rejected with an error and nothing is updated. The tool never writes into the `.dbml` file — it prints a proposal for you to review and paste in, and `--clipboard` also copies it. What SQL cannot tell it is marked `TODO` rather than guessed: always the `notebook` field, `source table` for a plain `CREATE TABLE`, and a computed column's type when the source column isn't in the model. Check every `TODO` by hand before considering the table done. Why the input is restricted to two shapes: [DECISIONS.md](DECISIONS.md).
+  Foreign keys are read from all three places a dumped schema puts them — inline `REFERENCES`, a table-level `FOREIGN KEY`, and a separate `ALTER TABLE ... ADD CONSTRAINT` — and written inline as `ref: >`. `--dialect postgres|snowflake|databricks|...` picks how the SQL is read and how types are spelled back out.
+
+  Any other SQL is rejected with an error and nothing is updated; `--skip-unsupported` instead skips those statements and reports what they were, which is what makes a whole `pg_dump -s` file usable. The tool never writes into the `.dbml` file — it prints a proposal for you to review and paste in, and `--clipboard` also copies it. What SQL cannot tell it is marked `TODO` rather than guessed: always the `notebook` field, `source table` for a plain `CREATE TABLE`, and a computed column's type when the source column isn't in the model. Check every `TODO` by hand before considering the table done. Why the input is restricted to two shapes: [DECISIONS.md](DECISIONS.md).
 - **Data lineage diagram**: `python scripts/lineage.py -o generated/lineage.md` builds a Mermaid flowchart from the `Note` fields and `Ref` relations — upstream source → process → table, plus the foreign keys, grouped by `TableGroup`. Nothing in it assumes Lakehouse vocabulary (see Generality below). A thin arrow runs into a process node (it reads that table) and a thick one out of it (it populates that table); missing or `TODO` lineage shows up in its own warning color rather than disappearing.
 
   `-o generated/lineage.html` instead produces a standalone **interactive** page (mermaid.js from a CDN) that opens with a double-click:
@@ -88,7 +108,9 @@ Every structural choice here — plain `.dbml` over a markdown fence or Mermaid 
   - `lineage.py` — generates a Mermaid lineage diagram (upstream source → notebook/pipeline/stored procedure → table, FK relations, `TableGroup` layers — generic, not tied to Lakehouse vocabulary) from the `Note` fields; not a parallel source of truth, just a generated view
   - `sql_to_dbml.py` — proposes a DBML table from SQL `CREATE TABLE/VIEW ... AS SELECT` or plain `CREATE TABLE` statements (see Tools); doesn't write directly, only prints a proposal
 - `generated/` — every view the scripts produce (`lineage.md`, `lineage.html`, `preview.md`). The contents are gitignored and are not a source of truth; only an empty `.gitkeep` is versioned, to keep the output location visible in the repo.
-- `examples/` — standalone example models, not part of the `dbml/` folder's source of truth. `generic_rdbms.dbml` proves the model/scripts generalize beyond a Lakehouse context (see Generality above).
+- `examples/` — standalone example models, not part of the `dbml/` folder's source of truth. One model per folder or file, so a folder argument always means one coherent model:
+  - `generic_rdbms.dbml` — a plain relational database, proving the scripts generalize beyond a Lakehouse context (see Generality above)
+  - `end_to_end/` — one architecture across four platforms in four files (see What it's good for)
 - `docs/img/` — static images used by this README. Refreshed by hand, unlike `generated/`.
 - `tests/` — pytest tests for the scripts (see Testing below)
 - [DECISIONS.md](DECISIONS.md) — why the repo is built this way, and the alternatives that were rejected
