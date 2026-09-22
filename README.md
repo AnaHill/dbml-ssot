@@ -67,7 +67,7 @@ An optional third line, `mechanism: <notebook|pipeline|stored_procedure>`, contr
 
 ```bash
 python scripts/validate_dbml.py examples/generic_rdbms.dbml
-python scripts/lineage.py examples/generic_rdbms.dbml -o generated/lineage_example.md
+python scripts/lineage.py examples/generic_rdbms.dbml -o generated/lineage_example.html
 ```
 
 ## Why it looks like this
