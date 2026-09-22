@@ -18,7 +18,7 @@ Five situations this actually helps with, and how much of each is automated:
 
 The first two and the last are the same loop: an LLM proposes, `validate_dbml.py` verifies, you review. Deterministic tooling only earns its place where the volume is too large to trust a model with — which is exactly the third and fourth case.
 
-[`examples/end_to_end/`](examples/end_to_end) shows where this ends up: one architecture, four files, four platforms — source systems → PostgreSQL → Snowflake → a Power BI semantic model — with the lineage running across all of them.
+[`examples/end_to_end/`](examples/end_to_end) shows where this ends up: one architecture in four files. Source systems land in a Snowflake stage schema, dbt builds a published star schema from it, and two different consumers read that — a PostgreSQL database serving an application, and a Power BI semantic model. The lineage runs across all of it, and the source systems appear only as `source table:` values, never as duplicate tables.
 
 ```bash
 python scripts/lineage.py examples/end_to_end -o generated/end_to_end.html

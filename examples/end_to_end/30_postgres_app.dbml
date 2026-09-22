@@ -1,0 +1,46 @@
+TableGroup postgres_app [color: #C6E2FF] {
+  app.customer
+  app.product
+  app.order_summary
+}
+
+Table app.customer {
+  customer_key   integer   [pk]
+  customer_name  varchar
+  country_code   varchar
+
+  Note: '''
+    source table: publish.dim_customer
+    notebook: reverse_etl/dag_sync_app_db
+    mechanism: pipeline
+    remark: PostgreSQL serves the customer portal — it reads from the warehouse, it is not a stop on the way into it
+  '''
+}
+
+Table app.product {
+  product_key   integer   [pk]
+  product_name  varchar
+  category      varchar
+  list_price    decimal
+
+  Note: '''
+    source table: publish.dim_product
+    notebook: reverse_etl/dag_sync_app_db
+    mechanism: pipeline
+  '''
+}
+
+Table app.order_summary {
+  customer_key   integer   [pk, ref: > app.customer.customer_key]
+  product_key    integer   [pk, ref: > app.product.product_key]
+  order_month    date      [pk]
+  order_count    integer
+  total_amount   decimal
+
+  Note: '''
+    source table: publish.fact_order_line
+    notebook: app.sp_refresh_order_summary
+    mechanism: stored_procedure
+    remark: pre-aggregated for the portal — the application never queries the fact table directly
+  '''
+}

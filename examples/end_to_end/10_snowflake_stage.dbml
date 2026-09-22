@@ -1,0 +1,90 @@
+Project end_to_end_example {
+  database_type: 'Multi-platform (Snowflake → PostgreSQL / Power BI)'
+  Note: '''
+    One architecture split across four files, one per stage of the flow:
+    source systems land in Snowflake STAGE, dbt builds a published star
+    schema, and two different consumers read from it — an application
+    database in PostgreSQL and a Power BI semantic model.
+
+    Not part of the dbml/ folder's source of truth. Render the whole chain:
+      python scripts/lineage.py examples/end_to_end -o generated/end_to_end.html
+
+    The source systems themselves are not modeled as tables — they are the
+    `source table:` values below, and the diagram derives the Sources block
+    from them. Modeling them twice would put the same system on screen as
+    both a source node and a table.
+  '''
+}
+
+TableGroup snowflake_stage [color: #C9E4DE] {
+  stage.customer
+  stage.order
+  stage.order_line
+  stage.product
+  stage.pricelist
+}
+
+Table stage.customer {
+  customer_id    integer   [pk]
+  customer_name  varchar
+  email          varchar
+  country_code   varchar
+
+  Note: '''
+    source table: salesforce.Account (REST API)
+    notebook: adf_pipelines/pl_copy_salesforce
+    mechanism: pipeline
+  '''
+}
+
+Table stage.order {
+  order_id     integer   [pk]
+  customer_id  integer
+  order_date   date
+  status       varchar
+
+  Note: '''
+    source table: shopify.orders (REST API)
+    notebook: adf_pipelines/pl_copy_shopify
+    mechanism: pipeline
+  '''
+}
+
+Table stage.order_line {
+  order_line_id  integer   [pk]
+  order_id       integer
+  product_id     integer
+  quantity       integer
+  unit_price     decimal
+
+  Note: '''
+    source table: shopify.order_lines (REST API)
+    notebook: adf_pipelines/pl_copy_shopify
+    mechanism: pipeline
+  '''
+}
+
+Table stage.product {
+  product_id    integer   [pk]
+  product_code  varchar
+  product_name  varchar
+  category      varchar
+
+  Note: '''
+    source table: dynamics.Products
+    notebook: adf_pipelines/pl_copy_dynamics
+    mechanism: pipeline
+  '''
+}
+
+Table stage.pricelist {
+  product_id   integer   [pk]
+  list_price   decimal
+  valid_from   date
+
+  Note: '''
+    source table: TODO
+    notebook: TODO
+    remark: a spreadsheet someone emails in — nobody knows who owns it or how it lands here yet, so both fields stay TODO instead of being guessed
+  '''
+}

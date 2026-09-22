@@ -10,7 +10,7 @@ Table semantic.Customer {
   country_code   varchar
 
   Note: '''
-    source table: warehouse.dim_customer
+    source table: publish.dim_customer
     notebook: fabric_pipelines/pl_refresh_sales_model
     mechanism: pipeline
   '''
@@ -22,7 +22,7 @@ Table semantic.Product {
   category      varchar
 
   Note: '''
-    source table: warehouse.dim_product
+    source table: publish.dim_product
     notebook: fabric_pipelines/pl_refresh_sales_model
     mechanism: pipeline
   '''
@@ -37,7 +37,7 @@ Table semantic.Sales {
   line_amount    decimal
 
   Note: '''
-    source table: warehouse.fact_order_line
+    source table: publish.fact_order_line
     notebook: fabric_pipelines/pl_refresh_sales_model
     mechanism: pipeline
     remark: the measures (Total Sales, Margin %) live in the semantic model, not in this file — DBML describes the tables a report reads, not the DAX
